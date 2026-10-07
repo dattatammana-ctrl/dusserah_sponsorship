@@ -12,7 +12,7 @@ const SHEET_ID = '1EGMumiBxnLya47f4eEn-RaWbxNpsW-Fs4RZHKKFRQoQ';   // your Googl
 const SHEETS = {
   Items:       { hdr: ['Category', 'Item', 'Date', 'Slot', 'Unit', 'Requirement', 'Est. amount', 'Deleted'], text: [1, 2, 3, 4, 5] },
   External:    { hdr: ['ID', 'Name', 'Amount', 'Date', 'Added'], text: [1, 2, 4, 5] },
-  Submissions: { hdr: ['SID', 'Timestamp', 'Donor', 'Phone', 'Tower', 'Flat', 'Item ID', 'Qty', 'Amount', 'Mode', 'Payment Ref'],  text: [1, 2, 3, 4, 5, 6, 11] }
+  Submissions: { hdr: ['SID', 'Timestamp', 'Donor', 'Phone', 'Tower', 'Flat', 'Item ID', 'Qty', 'Amount', 'Mode', 'Payment Screenshot'],  text: [1, 2, 3, 4, 5, 6, 11] }
 };
 /* "Actual cash donations through other source": sum of column L of this sheet (no sign-in needed by donors; the script reads it as you) */
 const OTHER_SHEET_ID = '1N28jKtSsuePNc5PMhAwyuCFXutCJhtWwxljgqoaeLrA';
@@ -46,6 +46,7 @@ function handle_(b) {
     if (b.pw !== ADMIN_PASSWORD) throw new Error('Wrong password');
     const a = p.slice(11);
     if (a === 'subs') return subs_();
+    if (a === 'shot') return shotGet_(b);
     if (a === 'ext') return ext_();
     const fn = { 'item': update_, 'item/add': add_, 'item/delete': del_, 'sub/delete': subDel_, 'ext/add': extAdd_, 'ext/update': extUpd_, 'ext/delete': extDel_ }[a];
     if (!fn) throw new Error('Not found');
@@ -58,7 +59,8 @@ function handle_(b) {
 function setup() {
   const sh = sheet_('Items'), sb = sheet_('Submissions'); sheet_('External'); otherTab_();
   if (!sb.getRange(1, 10).getValue()) sb.getRange(1, 10).setValue('Mode').setFontWeight('bold').setBackground('#fde7d0');
-  if (!sb.getRange(1, 11).getValue()) sb.getRange(1, 11).setValue('Payment Ref').setFontWeight('bold').setBackground('#fde7d0');
+  sb.getRange(1, 11).setValue('Payment Screenshot').setFontWeight('bold').setBackground('#fde7d0');
+  shotFolder_();   // creates the private Drive folder (also asks for Drive permission)
   if (sh.getLastRow() < 2) append_(sh, seed_());
   CacheService.getScriptCache().remove('state');
 }
@@ -132,8 +134,7 @@ function submit_(b) {
   if (['1', '2', '3', '4', '5'].indexOf(tower) < 0) throw new Error('Select tower (1-5)');
   if (!flat) throw new Error('Enter flat number');
   const mode = b.mode === 'Cash' ? 'Cash' : 'Physical';
-  const ref = mode === 'Cash' ? String(b.ref || '').trim() : '';
-  if (mode === 'Cash' && !/^[A-Za-z0-9]{8,30}$/.test(ref)) throw new Error('Enter your UPI transaction ID / UTR');
+  if (mode === 'Cash' && !b.shot) throw new Error('Please upload your payment screenshot');
   const need = {};
   (b.lines || []).slice(0, 200).forEach(l => { const q = Number(l.qty), id = Number(l.rid); if (q > 0 && isFinite(q)) need[id] = (need[id] || 0) + q; });
   const ids = Object.keys(need).map(Number);
@@ -147,6 +148,7 @@ function submit_(b) {
     if (mode === 'Physical' && need[id] > left + EPS)
       throw new Error('Only ' + Math.max(0, Math.round(left * 1000) / 1000) + ' ' + it.unit + ' left for "' + it.item + '" (' + it.date + '). Someone just sponsored it - reduce the quantity or choose Cash.');
   });
+  const ref = mode === 'Cash' ? saveShot_(b.shot, donor) : '';   // Drive link of the payment screenshot
   const ts = new Date().toISOString();
   append_(sheet_('Submissions'), ids.map(id => [Utilities.getUuid(), ts, donor, phone, tower, flat, id,
     need[id], Math.round(need[id] * items[id].est / items[id].req), mode, ref]));
@@ -233,6 +235,33 @@ function otherTab_() {
   if (s.getSheetByName('Other Source')) return;
   const sh = s.insertSheet('Other Source');
   sh.getRange(1, 1).setFormula('=IMPORTRANGE("https://docs.google.com/spreadsheets/d/' + OTHER_SHEET_ID + '","' + (OTHER_TAB ? OTHER_TAB + '!' : '') + 'A:L")');
+}
+
+/* ---------- payment screenshots (private Drive folder; viewable only through the admin password) ---------- */
+function shotFolder_() {
+  const name = 'Dusserah 2026 Payment Screenshots', it = DriveApp.getFoldersByName(name);
+  return it.hasNext() ? it.next() : DriveApp.createFolder(name);
+}
+function saveShot_(d, donor) {
+  const m = /^data:image\/(jpeg|png|webp);base64,/.exec(String(d).slice(0, 40));
+  if (!m) throw new Error('Invalid screenshot. Please upload an image.');
+  const body = String(d).slice(m[0].length);
+  if (body.length < 200 || body.length > 4000000) throw new Error('Screenshot is empty or too large');
+  const stamp = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyyMMdd_HHmmss');
+  const nm = 'pay_' + stamp + '_' + String(donor).replace(/[^A-Za-z0-9]/g, '').slice(0, 20) + '.' + (m[1] === 'jpeg' ? 'jpg' : m[1]);
+  return shotFolder_().createFile(Utilities.newBlob(Utilities.base64Decode(body), 'image/' + m[1], nm)).getUrl();
+}
+function shotGet_(b) {      // only files linked from a Submissions row can be read
+  const sh = sheet_('Submissions'), n = sh.getLastRow() - 1;
+  if (n < 1) throw new Error('Not found');
+  const rows = sh.getRange(2, 1, n, 11).getValues();
+  for (let i = 0; i < n; i++) if (String(rows[i][0]) === String(b.sid)) {
+    const m = /\/d\/([^\/?]+)/.exec(String(rows[i][10]));
+    if (!m) throw new Error('No screenshot for this entry');
+    const blob = DriveApp.getFileById(m[1]).getBlob();
+    return { data: 'data:' + blob.getContentType() + ';base64,' + Utilities.base64Encode(blob.getBytes()) };
+  }
+  throw new Error('Not found');
 }
 
 /* ---------- external sponsorship (admin only) ---------- */
