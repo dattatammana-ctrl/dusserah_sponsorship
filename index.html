@@ -31,7 +31,11 @@ button{cursor:pointer;background:var(--p);color:#fff;border:0}button.s{backgroun
 .scroll{max-height:420px;overflow:auto}
 a.btn{display:inline-block;background:var(--p);color:#fff;padding:11px 18px;border-radius:8px;text-decoration:none;margin:8px 0;font-weight:600}
 .opt{display:block;padding:10px;border:1px solid var(--b);border-radius:8px;margin:8px 0;cursor:pointer}.opt input{margin-right:8px}.opt.on{border-color:var(--p);background:#fff6ea}
+#ld{position:fixed;inset:0;background:#fff8f0cc;display:none;align-items:center;justify-content:center;flex-direction:column;gap:12px;z-index:50;font-weight:600;color:var(--p)}
+#ld.on{display:flex}#ld i{width:46px;height:46px;border:5px solid #f1d9c4;border-top-color:var(--p);border-radius:50%;animation:sp .8s linear infinite}
+@keyframes sp{to{transform:rotate(360deg)}}
 </style></head><body>
+<div id="ld"><i></i><span id="ldt">Loading…</span></div>
 <header><div><h1>🪔 OnCloud33 Dusserah 2026</h1><div style="opacity:.9;font-size:13px">Item-wise Sponsorship Tracker</div></div><button class="s" onclick="adminOpen()">🔒 Admin View</button></header>
 <main>
 <div class="kpis" id="kpis"></div><br>
@@ -66,13 +70,19 @@ let OTHER=null,EXTP=0,EXT=[],R=[],subs=[],AS=[],cart=[],sel=new Set(),isAdmin=fa
 const A=()=>R.filter(r=>!r.del);
 const $=s=>document.querySelector(s), inr=n=>'₹'+Math.round(n).toLocaleString('en-IN');
 const API_URL='https://script.google.com/macros/s/AKfycbwcxsAGt62NlsevOAC8QGHCsIBd20G5DCwFehvAevk8-MMUbaiZSM53DW8iSoFJZ8pm/exec';
-async function api(path,body){
+let pendingReq=0,ldTimer=null;
+function busyOn(msg){pendingReq++;clearTimeout(ldTimer);$('#ldt').textContent=msg||'Loading…';$('#ld').classList.add('on')}
+function busyOff(){pendingReq=Math.max(0,pendingReq-1);if(!pendingReq)ldTimer=setTimeout(()=>{if(!pendingReq)$('#ld').classList.remove('on')},150)}
+async function api(path,body,quiet){
+  if(!quiet)busyOn(path=='/api/submit'?'Submitting your contribution…':path=='/api/state'?'Loading…':'Saving…');
+  try{return await api0(path,body)}finally{if(!quiet)busyOff()}}
+async function api0(path,body){
   let r;
   try{r=await fetch(API_URL,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify(Object.assign({path,pw:PW},body||{}))})}
   catch(e){throw new Error('Cannot reach server')}
   const j=await r.json().catch(()=>({error:'Server error'}));
   if(j&&j.error)throw new Error(j.error);return j}
-async function load(){const s=await api('/api/state');R=s.items;subs=s.subs;OTHER=s.other;EXTP=s.ext||0}
+async function load(quiet){const s=await api('/api/state',null,quiet);R=s.items;subs=s.subs;OTHER=s.other;EXTP=s.ext||0}
 function fixCart(){cart=cart.filter(c=>R[c.rid]&&!R[c.rid].del&&c.qty>0)}
 const toast=m=>{const t=$('#toast');t.textContent=m;t.style.display='block';setTimeout(()=>t.style.display='none',2500)};
 const unitP=r=>r.est/r.req;
@@ -103,13 +113,13 @@ function renderSummary(){   // public view: no sponsored / pending figures
   $('#sum tbody').innerHTML=summaryData().map(x=>`<tr class="click ${x.cat==$('#cat').value&&x.item==$('#item').value?'sel':''}" onclick="pick('${esc(x.cat)}','${esc(x.item)}')"><td>${x.cat}</td><td><b>${x.item}</b></td><td>${x.nd>1?x.nd+' dates':x.rs[0].date}</td>
     <td class="n">${x.req} ${x.u}</td><td class="n">${inr(x.est)}</td></tr>`).join('');
   const G=summaryData();let e=0,sa=0,p=0;G.forEach(x=>{e+=x.est;sa+=x.sa;p+=Math.max(0,x.est-x.sa)});
-  $('#kpis').innerHTML=[['Total Budget (Estimated)',inr(e)],['Sponsored / Contributions',inr(sa)],['Pending',inr(p)],['Completion',(e?Math.min(100,sa/e*100):0).toFixed(1)+'%'],['Residents Donations',OTHER==null?'Unavailable':inr(OTHER)],['External Contribution',inr(EXTP)]]
+  $('#kpis').innerHTML=[['Total Budgeted',inr(e)],['Residents Donations',OTHER==null?'Unavailable':inr(OTHER)],['Sponsored / Contributions',inr(sa)],['External Contributions',inr(EXTP)],['Pending',inr(Math.max(0,e-(sa+(OTHER||0)+EXTP)))],['Completion',(e?Math.min(100,(sa+(OTHER||0)+EXTP)/e*100):0).toFixed(1)+'%']]
     .map(([a,b])=>`<div class="kpi"><b>${b}</b><span>${a}</span></div>`).join('');
 }
 async function showSum(){   // admin view: full detail (donor names come from the admin-only list)
   try{AS=await api('/api/admin/subs');EXT=await api('/api/admin/ext')}catch(e){return toast(e.message)}
   const G=summaryData(AS),extT=EXT.reduce((a,x)=>a+x.amt,0);let e=0,sa=0,p=0;G.forEach(x=>{e+=x.est;sa+=x.sa;p+=Math.max(0,x.est-x.sa)});
-  const k=[['Total Requirement',inr(e)],['Sponsored / Contributions',inr(sa)],['Pending',inr(p)],['Completion',(e?sa/e*100:0).toFixed(1)+'%'],['Residents Donations',OTHER==null?'Unavailable':inr(OTHER)],['External Contribution',inr(extT)],['Donors',new Set(AS.filter(s=>R[s.rid]&&!R[s.rid].del).map(s=>s.donor.toLowerCase())).size]]
+  const k=[['Total Budgeted',inr(e)],['Residents Donations',OTHER==null?'Unavailable':inr(OTHER)],['Sponsored / Contributions',inr(sa)],['External Contributions',inr(extT)],['Pending',inr(Math.max(0,e-(sa+(OTHER||0)+extT)))],['Completion',(e?Math.min(100,(sa+(OTHER||0)+extT)/e*100):0).toFixed(1)+'%'],['Donors',new Set(AS.filter(s=>R[s.rid]&&!R[s.rid].del).map(s=>s.donor.toLowerCase())).size]]
     .map(([a,b])=>`<div class="kpi"><b>${b}</b><span>${a}</span></div>`).join('');
   $('#admBody').innerHTML=`<div class="kpis">${k}</div><br><div class="scroll" style="max-height:58vh"><table><thead><tr><th>Category</th><th>Item</th><th>Dates</th><th class="n">Required</th><th class="n">Est. ₹</th><th class="n">Sponsored ₹</th><th class="n">Pending ₹</th><th class="n">Pending Qty</th><th>Progress</th><th>Donors</th></tr></thead><tbody>`+
   G.map(x=>`<tr><td>${x.cat}</td><td><b>${x.item}</b></td><td>${x.nd>1?x.nd+' dates':x.rs[0].date}</td><td class="n">${x.req} ${x.u}</td><td class="n">${inr(x.est)}</td><td class="n">${inr(x.sa)}</td><td class="n">${inr(Math.max(0,x.est-x.sa))}</td><td class="n">${x.pq} ${x.u}</td>
@@ -123,7 +133,7 @@ async function init(){
 async function poll(){
   if(busy||document.hidden||$('#am').classList.contains('on')||$('#pm').classList.contains('on'))return;
   const before=JSON.stringify([R,subs,OTHER,EXTP]),keep=[...sel];
-  try{await load()}catch(e){return}
+  try{await load(true)}catch(e){return}
   if(JSON.stringify([R,subs,OTHER,EXTP])===before)return;
   fixCart();refreshDD();keep.forEach(i=>{const r=R[i];if(r&&!r.del&&room(r)-inCart(r)>0)sel.add(i)});renderAll();
 }
