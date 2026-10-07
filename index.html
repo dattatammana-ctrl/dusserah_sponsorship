@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>OnCloud33 Dusserah 2026 – Item-wise Sponsorship Tracker</title>
+<style>
+:root{--p:#b3261e;--o:#e8710a;--bg:#fff8f0;--c:#fff;--b:#eadfd2;--g:#1e8e3e;--t:#2b2118}
+*{box-sizing:border-box}body{margin:0;font:14px/1.4 -apple-system,Segoe UI,Roboto,sans-serif;background:var(--bg);color:var(--t)}
+header{background:linear-gradient(90deg,var(--p),var(--o));color:#fff;padding:14px 22px;display:flex;justify-content:space-between;align-items:center}
+h1{margin:0;font-size:20px}h2{margin:0 0 10px;font-size:16px}
+main{max-width:1250px;margin:auto;padding:16px}
+.card{background:var(--c);border:1px solid var(--b);border-radius:12px;padding:14px;margin-bottom:16px}
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px}
+.kpi{background:var(--c);border:1px solid var(--b);border-radius:12px;padding:10px 14px}.kpi b{display:block;font-size:20px}.kpi span{color:#7a6a5a;font-size:12px}
+table{width:100%;border-collapse:collapse}th,td{padding:6px 8px;border-bottom:1px solid var(--b);text-align:left;vertical-align:top}
+th{background:#faf0e4;font-size:12px;text-transform:uppercase;letter-spacing:.3px;position:sticky;top:0}
+td.n,th.n{text-align:right}tbody tr.sel{background:#fff1dc}tbody tr.click{cursor:pointer}tbody tr.click:hover{background:#fff6ea}
+.bar{height:8px;background:#eee;border-radius:5px;overflow:hidden;min-width:70px}.bar i{display:block;height:100%;background:var(--g)}
+.tag{display:inline-block;background:#e6f4ea;color:#137333;border-radius:10px;padding:1px 8px;font-size:12px;margin:1px}
+.tag.p{background:#fde7e7;color:var(--p)}
+select,input,button{font:inherit;padding:7px 10px;border:1px solid #cdbda9;border-radius:8px;background:#fff}
+button{cursor:pointer;background:var(--p);color:#fff;border:0}button.s{background:#fff;color:var(--p);border:1px solid var(--p)}button:disabled{opacity:.4;cursor:not-allowed}
+.grid{display:grid;grid-template-columns:1.1fr 1fr;gap:16px}@media(max-width:900px){.grid{grid-template-columns:1fr}}
+.cal{display:grid;grid-template-columns:repeat(7,1fr);gap:4px;max-width:360px}
+.cal div{text-align:center;padding:8px 0;border-radius:8px;font-size:13px;color:#bbb}.cal .h{color:#7a6a5a;font-weight:600}
+.cal .av{background:#fde7e7;color:var(--p);cursor:pointer;font-weight:600}.cal .full{background:#e6f4ea;color:#137333}.cal .sl{background:var(--p);color:#fff;cursor:pointer;font-weight:700}
+.cal .av:hover{outline:2px solid var(--o)}
+.legend span{margin-right:12px;font-size:12px}.legend i{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:4px}
+.row{display:flex;gap:10px;flex-wrap:wrap;align-items:end}.row label{display:flex;flex-direction:column;font-size:12px;color:#7a6a5a;gap:3px}
+.modal{position:fixed;inset:0;background:#0007;display:none;align-items:center;justify-content:center;z-index:9}.modal.on{display:flex}
+.modal>div{background:#fff;border-radius:12px;padding:20px;width:min(1100px,94vw);max-height:90vh;overflow:auto}
+.muted{color:#8a7a6a}.right{text-align:right}.toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:#222;color:#fff;padding:10px 18px;border-radius:20px;display:none}
+.scroll{max-height:420px;overflow:auto}
+</style></head><body>
+<header><div><h1>🪔 OnCloud33 Dusserah 2026</h1><div style="opacity:.9;font-size:13px">Item-wise Sponsorship Tracker</div></div><button class="s" onclick="adminOpen()">🔒 Admin View</button></header>
+<main>
+<div class="kpis" id="kpis"></div><br>
+
+<div class="card"><h2>Item Summary <small class="muted">(click a row to sponsor)</small></h2>
+<div class="scroll"><table id="sum"><thead><tr><th>Category</th><th>Item</th><th>Dates</th><th class="n">Required</th><th class="n">Est. ₹</th><th class="n">Sponsored ₹</th><th class="n">Pending ₹</th><th class="n">Pending Qty</th><th>Progress</th><th>Donors</th></tr></thead><tbody></tbody></table></div></div>
+
+<div class="grid">
+<div class="card"><h2>1. Select Item &amp; Dates</h2>
+<div class="row"><label>Category<select id="cat"></select></label><label>Item<select id="item"></select></label></div><br>
+<div id="calWrap"></div>
+<div class="legend"><span><i style="background:#fde7e7"></i>Pending</span><span><i style="background:var(--p)"></i>Selected</span><span><i style="background:#e6f4ea"></i>Fully sponsored</span></div><br>
+<div class="scroll" style="max-height:260px"><table id="slots"><thead><tr><th></th><th>Date</th><th>Slot</th><th class="n">Pending Qty</th><th class="n">Pending ₹</th></tr></thead><tbody></tbody></table></div><br>
+<button onclick="addCart()">🛒 Add selected to cart</button></div>
+
+<div class="card"><h2>2. Shopping Cart</h2>
+<div class="scroll" style="max-height:300px"><table id="cart"><thead><tr><th>Item</th><th>Date / Slot</th><th>Qty</th><th class="n">₹</th><th></th></tr></thead><tbody></tbody></table></div>
+<p class="right"><b>Total sponsorship: <span id="ctot">₹0</span></b></p>
+<div class="row"><label>Donor name *<input id="dn"></label><label>Phone *<input id="dp" type="tel" inputmode="numeric" maxlength="10" placeholder="10-digit number" style="width:140px"></label><label>Tower *<select id="dt"><option value="">Select</option><option>1</option><option>2</option><option>3</option><option>4</option><option>5</option></select></label><label>Flat No. *<input id="df" style="width:90px" placeholder="e.g. 304"></label><button onclick="submitCart()">✔ Submit sponsorship</button></div></div>
+</div>
+</main>
+
+<div class="modal" id="am"><div>
+<div id="login"><h2>Admin login</h2><div class="row"><input type="password" id="pw" placeholder="Password" onkeydown="if(event.key=='Enter')adminLogin()"><button onclick="adminLogin()">Login</button><button class="s" onclick="closeM()">Cancel</button></div></div>
+<div id="panel" style="display:none"><div class="row" style="justify-content:space-between"><h2>Admin – Submitted Sponsorships</h2><div class="row"><button onclick="exportCsv()">⬇ Export CSV</button><button class="s" onclick="closeM()">Close</button></div></div>
+<div id="adm"></div></div></div></div>
+<div class="toast" id="toast"></div>
+
+<script>
+let R=[],subs=[],AS=[],cart=[],sel=new Set(),isAdmin=false,PW='',busy=false;
+const A=()=>R.filter(r=>!r.del);
+const $=s=>document.querySelector(s), inr=n=>'₹'+Math.round(n).toLocaleString('en-IN');
+const API_URL='https://script.google.com/macros/s/AKfycbwcxsAGt62NlsevOAC8QGHCsIBd20G5DCwFehvAevk8-MMUbaiZSM53DW8iSoFJZ8pm/exec';
+async function api(path,body){
+  let r;
+  try{r=await fetch(API_URL,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify(Object.assign({path,pw:PW},body||{}))})}
+  catch(e){throw new Error('Cannot reach server')}
+  const j=await r.json().catch(()=>({error:'Server error'}));
+  if(j&&j.error)throw new Error(j.error);return j}
+async function load(){const s=await api('/api/state');R=s.items;subs=s.subs}
+function fixCart(){cart=cart.filter(c=>R[c.rid]&&!R[c.rid].del);cart.forEach(c=>c.qty=Math.min(c.qty,pend(R[c.rid])));cart=cart.filter(c=>c.qty>0)}
+const toast=m=>{const t=$('#toast');t.textContent=m;t.style.display='block';setTimeout(()=>t.style.display='none',2500)};
+const unitP=r=>r.est/r.req;
+const spQty=r=>subs.filter(s=>s.rid==r.id).reduce((a,s)=>a+s.qty,0);
+const inCart=r=>cart.filter(c=>c.rid==r.id).reduce((a,c)=>a+c.qty,0);
+const pend=r=>Math.max(0,r.req-spQty(r));
+const key=r=>r.cat+'|'+r.item;
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+
+function renderSummary(){
+  const g={};A().forEach(r=>{(g[key(r)]??=[]).push(r)});
+  let T={e:0,s:0,p:0};
+  $('#sum tbody').innerHTML=Object.entries(g).map(([k,rs])=>{
+    const [cat,item]=k.split('|');
+    const req=rs.reduce((a,r)=>a+r.req,0), est=rs.reduce((a,r)=>a+r.est,0);
+    const sa=rs.reduce((a,r)=>a+spQty(r)*unitP(r),0), pq=rs.reduce((a,r)=>a+pend(r),0);
+    const u=[...new Set(rs.map(r=>r.unit))].join('/');
+    const names=[...new Set(subs.filter(s=>rs.some(r=>r.id==s.rid)).map(s=>s.donor))];
+    T.e+=est;T.s+=sa;T.p+=est-sa;
+    const pct=est?sa/est*100:0, nd=new Set(rs.map(r=>r.date)).size;
+    return `<tr class="click ${cat==$('#cat').value&&item==$('#item').value?'sel':''}" onclick="pick('${esc(cat)}','${esc(item)}')"><td>${cat}</td><td><b>${item}</b></td><td>${nd>1?nd+' dates':rs[0].date}</td>
+    <td class="n">${req} ${u}</td><td class="n">${inr(est)}</td><td class="n">${inr(sa)}</td><td class="n">${inr(est-sa)}</td><td class="n">${pq} ${u}</td>
+    <td><div class="bar"><i style="width:${pct}%"></i></div>${pct.toFixed(0)}%</td>
+    <td>${names.map(n=>`<span class="tag">${esc(n)}</span>`).join('')||'<span class="muted">—</span>'}</td></tr>`}).join('');
+  $('#kpis').innerHTML=[['Total Requirement',inr(T.e)],['Sponsored',inr(T.s)],['Pending',inr(T.p)],['Completion',(T.e?T.s/T.e*100:0).toFixed(1)+'%'],['Donors',new Set(subs.filter(s=>!R[s.rid].del).map(s=>s.donor.toLowerCase())).size]]
+   .map(([a,b])=>`<div class="kpi"><b>${b}</b><span>${a}</span></div>`).join('');
+}
+async function init(){
+  try{await load()}catch(e){$('#kpis').innerHTML='<div class="kpi"><b>⚠ Server not reachable</b><span>Check your internet connection and try again.</span></div>';return}
+  $('#cat').onchange=()=>{fillItems();sel.clear();renderPick()};$('#item').onchange=()=>{sel.clear();renderPick();renderSummary()};
+  refreshDD();renderAll();setInterval(poll,20000);
+}
+async function poll(){
+  if(busy||document.hidden||$('#am').classList.contains('on'))return;
+  const before=JSON.stringify([R,subs]),keep=[...sel];
+  try{await load()}catch(e){return}
+  if(JSON.stringify([R,subs])===before)return;
+  fixCart();refreshDD();keep.forEach(i=>{const r=R[i];if(r&&!r.del&&pend(r)-inCart(r)>0)sel.add(i)});renderAll();
+}
+function fillItems(){const items=[...new Set(A().filter(r=>r.cat==$('#cat').value).map(r=>r.item))];$('#item').innerHTML=items.map(i=>`<option>${i}</option>`).join('')}
+function pick(c,i){$('#cat').value=c;fillItems();$('#item').value=i;sel.clear();renderPick();renderSummary();$('#calWrap').scrollIntoView({behavior:'smooth',block:'center'})}
+const cur=()=>A().filter(r=>r.cat==$('#cat').value&&r.item==$('#item').value);
+function renderPick(){
+  const rs=cur(), multi=new Set(rs.map(r=>r.date)).size>1;
+  const first=new Date(2026,9,1), off=first.getDay();
+  let h='<div class="cal">'+'SMTWTFS'.split('').map(d=>`<div class="h">${d}</div>`).join('')+'<div style="padding:0"></div>'.repeat(off);
+  for(let d=1;d<=31;d++){
+    const dr=rs.filter(r=>r.day==d);let c='',oc='';
+    if(dr.length){const open=dr.filter(r=>pend(r)-inCart(r)>0&&r.day);
+      if(!open.length)c='full';else if(dr.some(r=>sel.has(r.id)))c='sl',oc=`onclick="togDay(${d})"`;else c='av',oc=`onclick="togDay(${d})"`}
+    h+=`<div class="${c}" ${oc}>${d}</div>`}
+  $('#calWrap').innerHTML=`<b>October 2026</b> <span class="muted">${multi?'– click dates to select':'– single date item'}</span>${h}</div>`;
+  $('#slots tbody').innerHTML=rs.map(r=>{const p=pend(r)-inCart(r);return `<tr><td><input type="checkbox" ${p<=0?'disabled':''} ${sel.has(r.id)?'checked':''} onchange="togRow(${r.id})"></td>
+   <td>${r.date}</td><td>${r.slot}</td><td class="n">${p>0?p+' '+r.unit:'<span class="tag">Sponsored</span>'}</td><td class="n">${inr(Math.max(p,0)*unitP(r))}</td></tr>`}).join('');
+}
+function togRow(i){sel.has(i)?sel.delete(i):sel.add(i);renderPick()}
+function togDay(d){const rs=cur().filter(r=>r.day==d&&pend(r)-inCart(r)>0);const all=rs.every(r=>sel.has(r.id));rs.forEach(r=>all?sel.delete(r.id):sel.add(r.id));renderPick()}
+function addCart(){
+  if(!sel.size)return toast('Select at least one date/slot');
+  sel.forEach(i=>{const r=R[i],p=pend(r)-inCart(r);if(p>0)cart.push({rid:i,qty:p})});
+  sel.clear();renderPick();renderCart();toast('Added to cart');
+}
+function renderCart(){
+  $('#cart tbody').innerHTML=cart.length?cart.map((c,n)=>{const r=R[c.rid];return `<tr><td>${r.item}</td><td>${r.date} · ${r.slot}</td>
+   <td><input type="number" min="0" step="any" value="${c.qty}" style="width:80px" onchange="setQty(${n},this.value)"> ${r.unit}</td><td class="n">${inr(c.qty*unitP(r))}</td><td><button class="s" onclick="cart.splice(${n},1);renderAll()">✕</button></td></tr>`}).join('')
+   :'<tr><td colspan="5" class="muted">Cart is empty</td></tr>';
+  $('#ctot').textContent=inr(cart.reduce((a,c)=>a+c.qty*unitP(R[c.rid]),0));
+}
+function setQty(n,v){const c=cart[n],r=R[c.rid];const others=inCart(r)-c.qty;c.qty=Math.max(0,Math.min(+v||0,pend(r)-others));renderAll()}
+function renderAll(){renderSummary();renderPick();renderCart()}
+async function submitCart(){
+  if(busy)return;
+  const donor=$('#dn').value.trim(),phone=$('#dp').value.trim(),tower=$('#dt').value,flat=$('#df').value.trim();
+  if(!cart.length)return toast('Cart is empty');if(!donor)return toast('Enter donor name');
+  if(!/^\d{10}$/.test(phone))return toast('Enter a valid 10-digit phone number');
+  if(!tower)return toast('Select tower (1-5)');if(!flat)return toast('Enter flat number');
+  busy=true;
+  try{await api('/api/submit',{donor,phone,tower,flat,lines:cart.filter(c=>c.qty>0)});
+    cart=[];$('#dn').value=$('#dp').value=$('#df').value='';$('#dt').value='';toast('Sponsorship submitted. Thank you! 🙏')}
+  catch(e){toast(e.message)}
+  try{await load()}catch(x){}
+  busy=false;fixCart();refreshDD();renderAll();
+}
+/* Admin */
+function adminOpen(){$('#am').classList.add('on');if(isAdmin)showAdmin();else{$('#login').style.display='';$('#panel').style.display='none';$('#pw').value='';$('#pw').focus()}}
+function closeM(){$('#am').classList.remove('on');refreshDD();renderAll()}
+async function adminLogin(){PW=$('#pw').value;try{await api('/api/admin/subs');isAdmin=true;showAdmin()}catch(e){PW='';toast(e.message)}}
+let tab='subs';
+async function showAdmin(){
+  try{await load()}catch(e){}
+  $('#login').style.display='none';$('#panel').style.display='';
+  $('#adm').innerHTML=`<div class="row" style="margin-bottom:10px"><button class="${tab=='subs'?'':'s'}" onclick="tab='subs';showAdmin()">Submissions</button><button class="${tab=='items'?'':'s'}" onclick="tab='items';showAdmin()">Manage Items</button></div><div id="admBody"></div>`;
+  tab=='subs'?showSubs():showItems();
+}
+function refreshDD(){
+  const c=$('#cat').value,i=$('#item').value,cats=[...new Set(A().map(r=>r.cat))];
+  $('#cat').innerHTML=cats.map(x=>`<option>${esc(x)}</option>`).join('');if(cats.includes(c))$('#cat').value=c;
+  fillItems();if([...$('#item').options].some(o=>o.value==i))$('#item').value=i;sel.clear();
+}
+function showItems(){
+  const cats=[...new Set(A().map(r=>r.cat))];
+  const inp=(r,f,w)=>`<input value="${esc(r[f])}" style="width:${w}px" onchange="fld(${r.id},'${f}',this.value)">`;
+  const num=(r,f)=>`<input type="number" min="0" step="any" value="${r[f]}" style="width:85px" onchange="fld(${r.id},'${f}',this.value)">`;
+  $('#admBody').innerHTML=`<datalist id="cl">${cats.map(c=>`<option value="${esc(c)}">`).join('')}</datalist>
+  <h3>➕ Add new item</h3><div class="row">
+  <label>Category<input id="nc" list="cl"></label><label>Item<input id="ni"></label>
+  <label>From date<input type="date" id="nf"></label><label>To date (optional)<input type="date" id="nt"></label>
+  <label>Slot<input id="ns" style="width:90px" placeholder="Morning"></label><label>Unit<input id="nu" style="width:60px" placeholder="Kg"></label>
+  <label>Qty / day<input id="nq" type="number" min="0" step="any" style="width:80px"></label><label>Est. ₹ / day<input id="ne" type="number" min="0" step="any" style="width:90px"></label>
+  <button onclick="addItem()">Add</button></div>
+  <p class="muted">Leave dates blank for an "All Days" item. A date range creates one row per day. Est. ₹ is the total cost for that row's quantity.</p>
+  <h3>✏️ Edit existing items <small class="muted">(changes save automatically; date format dd/mm/yy or All Days)</small></h3>
+  <div class="scroll" style="max-height:48vh"><table><thead><tr><th>Category</th><th>Item</th><th>Date</th><th>Slot</th><th>Unit</th><th>Qty</th><th>Est. ₹</th><th>Sponsored</th><th></th></tr></thead><tbody>`+
+  A().map(r=>`<tr><td>${inp(r,'cat',110)}</td><td>${inp(r,'item',190)}</td><td>${inp(r,'date',80)}</td><td>${inp(r,'slot',80)}</td><td>${inp(r,'unit',55)}</td><td>${num(r,'req')}</td><td>${num(r,'est')}</td><td>${spQty(r)} ${esc(r.unit)}</td><td><button class="s" onclick="delItem(${r.id})">Delete</button></td></tr>`).join('')+'</tbody></table></div>';
+}
+async function admin(path,body){
+  try{await api(path,body);await load();return true}
+  catch(e){toast(e.message);try{await load()}catch(x){}return false}}
+async function fld(id,f,v){
+  if(await admin('/api/admin/item',{id,field:f,value:v.trim()}))toast('Saved');else showItems();
+  fixCart();refreshDD();renderAll();
+}
+async function addItem(){
+  const g=i=>$('#'+i).value.trim();
+  const cat=g('nc'),item=g('ni'),slot=g('ns')||'-',unit=g('nu')||'Qty',q=+g('nq'),e=+g('ne'),f=g('nf'),t=g('nt')||f;
+  if(!cat||!item||!(q>0)||g('ne')===''||!(e>=0))return toast('Fill category, item, qty and est. amount');
+  if(t<f)return toast('To date is before From date');
+  const p=n=>String(n).padStart(2,'0'),mk=date=>({cat,item,date,slot,unit,req:q,est:e}),rows=[];
+  if(!f)rows.push(mk('All Days'));
+  else for(let d=new Date(f+'T00:00'),n=0;d<=new Date(t+'T00:00')&&n<62;d.setDate(d.getDate()+1),n++)
+    rows.push(mk(p(d.getDate())+'/'+p(d.getMonth()+1)+'/'+String(d.getFullYear()).slice(2)));
+  if(await admin('/api/admin/item/add',{rows}))toast('Item added');
+  refreshDD();renderAll();showItems();
+}
+async function delItem(i){
+  const r=R[i],n=subs.filter(s=>s.rid==i).length;
+  if(!confirm(`Delete "${r.item}" (${r.date} · ${r.slot})?`+(n?`\n${n} donor submission(s) exist; they stay in the Submissions list.`:'')))return;
+  await admin('/api/admin/item/delete',{id:i});sel.delete(i);fixCart();refreshDD();renderAll();showItems();
+}
+async function showSubs(){
+  try{AS=await api('/api/admin/subs')}catch(e){return toast(e.message)}
+  const tot=AS.reduce((a,s)=>a+s.amt,0);
+  $('#admBody').innerHTML=`<p><b>${AS.length}</b> entries · Total collected commitments <b>${inr(tot)}</b></p><div class="scroll" style="max-height:60vh"><table><thead><tr><th>Submitted</th><th>Donor</th><th>Phone</th><th>Tower</th><th>Flat</th><th>Category</th><th>Item</th><th>Date</th><th>Slot</th><th class="n">Qty</th><th class="n">Amount</th><th></th></tr></thead><tbody>`+
+  (AS.map(s=>{const r=R[s.rid];return `<tr><td>${new Date(s.ts).toLocaleString('en-IN')}</td><td>${esc(s.donor)}</td><td>${esc(s.phone||s.contact||'')}</td><td>${esc(s.tower||'')}</td><td>${esc(s.flat||'')}</td><td>${r.cat}</td><td>${r.item}</td><td>${r.date}</td><td>${r.slot}</td><td class="n">${s.qty} ${r.unit}</td><td class="n">${inr(s.amt)}</td><td><button class="s" onclick="delSub('${s.sid}')">Delete</button></td></tr>`}).join('')||'<tr><td colspan="12" class="muted">No submissions yet</td></tr>')+'</tbody></table></div>';
+}
+async function delSub(sid){if(!confirm('Delete this entry?'))return;await admin('/api/admin/sub/delete',{sid});fixCart();renderAll();showSubs()}
+function exportCsv(){
+  const rows=[['Submitted','Donor','Phone','Tower','Flat','Category','Item','Date','Slot','Qty','Unit','Amount']].concat(AS.map(s=>{const r=R[s.rid];return [s.ts,s.donor,s.phone||s.contact||'',s.tower||'',s.flat||'',r.cat,r.item,r.date,r.slot,s.qty,r.unit,s.amt]}));
+  const csv=rows.map(r=>r.map(v=>`"${String(v).replace(/"/g,'""')}"`).join(',')).join('\n');
+  const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv'}));a.download='sponsorships.csv';a.click();
+}
+init();
+</script></body></html>

@@ -1,0 +1,201 @@
+/**
+ * OnCloud33 Dusserah 2026 – Sponsorship Tracker backend (Google Apps Script + Google Sheets)
+ *
+ * SETUP: Sheet > Extensions > Apps Script > paste this as Code.gs, add an HTML file named Index (paste Index.html) > run setup() once
+ *        > Deploy > New deployment > Web app > Execute as: Me, Who has access: Anyone > share the /exec URL.
+ * Sheets used: "Items" (sponsorship items) and "Submissions" (donor entries) - created automatically.
+ * NOTE: Do not delete or sort rows in "Items" (row position = item id). To remove an item, put Y in the "Deleted" column.
+ */
+const ADMIN_PASSWORD = 'Dusserah2026';
+const SHEET_ID = '1EGMumiBxnLya47f4eEn-RaWbxNpsW-Fs4RZHKKFRQoQ';   // your Google Sheet (works standalone or from Extensions > Apps Script)
+
+const SHEETS = {
+  Items:       { hdr: ['Category', 'Item', 'Date', 'Slot', 'Unit', 'Requirement', 'Est. amount', 'Deleted'], text: [1, 2, 3, 4, 5] },
+  Submissions: { hdr: ['SID', 'Timestamp', 'Donor', 'Phone', 'Tower', 'Flat', 'Item ID', 'Qty', 'Amount'],  text: [1, 2, 3, 4, 5, 6] }
+};
+const FIELD_COL = { cat: 1, item: 2, date: 3, slot: 4, unit: 5, req: 6, est: 7 };
+const EPS = 1e-9;
+
+/* ---------- entry points ---------- */
+// GitHub Pages hosts the page; this script is only the data API.
+function doGet() { return json_(state_()); }
+
+function doPost(e) {
+  try { return json_(handle_(JSON.parse(e.postData.contents))); }
+  catch (err) { return json_({ error: err.message }); }
+}
+
+function json_(o) { return ContentService.createTextOutput(JSON.stringify(o)).setMimeType(ContentService.MimeType.JSON); }
+
+function handle_(b) {
+  const p = String(b.path);
+  if (p === '/api/state') return state_();
+  if (p === '/api/submit') return locked_(() => submit_(b));
+  if (p.indexOf('/api/admin/') === 0) {
+    if (b.pw !== ADMIN_PASSWORD) throw new Error('Wrong password');
+    const a = p.slice(11);
+    if (a === 'subs') return subs_();
+    const fn = { 'item': update_, 'item/add': add_, 'item/delete': del_, 'sub/delete': subDel_ }[a];
+    if (!fn) throw new Error('Not found');
+    return locked_(() => fn(b));
+  }
+  throw new Error('Not found');
+}
+
+/** Run once: creates both sheets and loads the starting items. */
+function setup() {
+  const sh = sheet_('Items'); sheet_('Submissions');
+  if (sh.getLastRow() < 2) append_(sh, seed_());
+  CacheService.getScriptCache().remove('state');
+}
+
+/* ---------- helpers ---------- */
+function ss_() { return SHEET_ID ? SpreadsheetApp.openById(SHEET_ID) : SpreadsheetApp.getActiveSpreadsheet(); }
+
+function sheet_(name) {
+  const s = ss_(); let sh = s.getSheetByName(name);
+  if (!sh) {
+    const c = SHEETS[name];
+    sh = s.insertSheet(name);
+    sh.getRange(1, 1, 1, c.hdr.length).setValues([c.hdr]).setFontWeight('bold').setBackground('#fde7d0');
+    sh.setFrozenRows(1);
+    c.text.forEach(col => sh.getRange(2, col, sh.getMaxRows() - 1, 1).setNumberFormat('@')); // keep "11/10/26", phones etc. as text
+  }
+  return sh;
+}
+
+function append_(sh, rows) {
+  const r = sh.getLastRow() + 1, w = rows[0].length;
+  if (r + rows.length - 1 > sh.getMaxRows()) sh.insertRowsAfter(sh.getMaxRows(), rows.length);
+  SHEETS[sh.getName()].text.forEach(c => sh.getRange(r, c, rows.length, 1).setNumberFormat('@'));
+  sh.getRange(r, 1, rows.length, w).setValues(rows);
+}
+
+function locked_(fn) {
+  const l = LockService.getScriptLock(); l.waitLock(25000);
+  try { const r = fn(); SpreadsheetApp.flush(); CacheService.getScriptCache().remove('state'); return r; }
+  finally { l.releaseLock(); }
+}
+
+function dateStr_(v) { return v instanceof Date ? Utilities.formatDate(v, Session.getScriptTimeZone(), 'dd/MM/yy') : String(v).trim(); }
+function dayOf_(d) { const m = /^(\d+)\/(\d+)\/(\d+)$/.exec(d); return m && +m[2] === 10 && +m[3] === 26 ? +m[1] : 0; }
+
+function items_() {
+  const sh = sheet_('Items'), n = sh.getLastRow() - 1;
+  if (n < 1) return [];
+  return sh.getRange(2, 1, n, 8).getValues().map((r, i) => {
+    const d = dateStr_(r[2]), req = Number(r[5]) || 0;
+    return { id: i, cat: String(r[0]), item: String(r[1]), date: d, slot: String(r[3]), unit: String(r[4]),
+             req: req, est: Number(r[6]) || 0, day: dayOf_(d),
+             del: String(r[7]).toUpperCase() === 'Y' || !r[0] || !r[1] || !(req > 0) };
+  });
+}
+
+function subs_() {
+  const sh = sheet_('Submissions'), n = sh.getLastRow() - 1;
+  if (n < 1) return [];
+  return sh.getRange(2, 1, n, 9).getValues().filter(r => r[0] !== '').map(r => ({
+    sid: String(r[0]), ts: String(r[1]), donor: String(r[2]), phone: String(r[3]), tower: String(r[4]), flat: String(r[5]),
+    rid: Number(r[6]), qty: Number(r[7]), amt: Number(r[8]) }));
+}
+
+function state_() {
+  const c = CacheService.getScriptCache(), hit = c.get('state');
+  if (hit) return JSON.parse(hit);
+  const s = { items: items_(), subs: subs_().map(x => ({ sid: x.sid, rid: x.rid, qty: x.qty, donor: x.donor, amt: x.amt })) }; // no phone/flat publicly
+  try { c.put('state', JSON.stringify(s), 30); } catch (e) {}
+  return s;
+}
+
+function sponsored_(subs, rid) { return subs.reduce((a, s) => a + (s.rid === rid ? s.qty : 0), 0); }
+
+/* ---------- donor submit ---------- */
+function submit_(b) {
+  const donor = String(b.donor || '').trim().slice(0, 80), phone = String(b.phone || '').trim();
+  const tower = String(b.tower || ''), flat = String(b.flat || '').trim().slice(0, 10);
+  if (!donor) throw new Error('Enter donor name');
+  if (!/^\d{10}$/.test(phone)) throw new Error('Enter a valid 10-digit phone number');
+  if (['1', '2', '3', '4', '5'].indexOf(tower) < 0) throw new Error('Select tower (1-5)');
+  if (!flat) throw new Error('Enter flat number');
+  const need = {};
+  (b.lines || []).slice(0, 200).forEach(l => { const q = Number(l.qty), id = Number(l.rid); if (q > 0 && isFinite(q)) need[id] = (need[id] || 0) + q; });
+  const ids = Object.keys(need).map(Number);
+  if (!ids.length) throw new Error('Cart is empty');
+
+  const items = items_(), subs = subs_();
+  ids.forEach(id => {
+    const it = items[id];
+    if (!it || it.del) throw new Error('An item in your cart was removed. Please review your cart.');
+    const left = it.req - sponsored_(subs, id);
+    if (need[id] > left + EPS)
+      throw new Error('Only ' + Math.max(left, 0) + ' ' + it.unit + ' left for "' + it.item + '" (' + it.date + '). Someone just sponsored it - please review your cart.');
+  });
+  const ts = new Date().toISOString();
+  append_(sheet_('Submissions'), ids.map(id => [Utilities.getUuid(), ts, donor, phone, tower, flat, id,
+    need[id], Math.round(need[id] * items[id].est / items[id].req)]));
+  return { ok: true };
+}
+
+/* ---------- admin ---------- */
+function checkField_(f, v, id) {
+  if (f === 'req' || f === 'est') {
+    v = Number(v);
+    if (!isFinite(v) || v < 0 || (f === 'req' && v <= 0)) throw new Error('Invalid number');
+    if (f === 'req') { const sp = sponsored_(subs_(), id); if (v < sp - EPS) throw new Error("Quantity can't be lower than already sponsored (" + sp + ')'); }
+    return v;
+  }
+  if (!(f in FIELD_COL)) throw new Error('Bad field');
+  v = String(v).trim().slice(0, 120);
+  if (!v) throw new Error('Value required');
+  if (f === 'date' && v !== 'All Days' && !/^\d{1,2}\/\d{1,2}\/\d{2}$/.test(v)) throw new Error('Use dd/mm/yy or All Days');
+  return v;
+}
+
+function update_(b) {
+  const id = Number(b.id), sh = sheet_('Items');
+  if (!(id >= 0) || id + 2 > sh.getLastRow()) throw new Error('Bad request');
+  sh.getRange(id + 2, FIELD_COL[b.field]).setValue(checkField_(b.field, b.value, id));
+  return { ok: true };
+}
+
+function add_(b) {
+  const rows = b.rows || [];
+  if (!rows.length || rows.length > 100) throw new Error('Bad request');
+  append_(sheet_('Items'), rows.map(x => [checkField_('cat', x.cat), checkField_('item', x.item), checkField_('date', x.date),
+    checkField_('slot', x.slot), checkField_('unit', x.unit), checkField_('req', x.req), checkField_('est', x.est), '']));
+  return { ok: true };
+}
+
+function del_(b) {
+  const id = Number(b.id), sh = sheet_('Items');
+  if (!(id >= 0) || id + 2 > sh.getLastRow()) throw new Error('Bad request');
+  sh.getRange(id + 2, 8).setValue('Y');            // soft delete keeps ids stable
+  return { ok: true };
+}
+
+function subDel_(b) {
+  const sh = sheet_('Submissions'), n = sh.getLastRow() - 1;
+  if (n < 1) return { ok: true };
+  const ids = sh.getRange(2, 1, n, 1).getValues();
+  for (let i = 0; i < n; i++) if (String(ids[i][0]) === String(b.sid)) { sh.deleteRow(i + 2); break; }
+  return { ok: true };
+}
+
+/* ---------- starting data ---------- */
+function seed_() {
+  const rows = [], ds = d => d + '/10/26';
+  const add = (cat, item, date, slot, unit, req, est) => rows.push([cat, item, date, slot, unit, req, est, '']);
+  for (let d = 11; d <= 20; d++) add('Puja', 'Puja Items', ds(d), 'Day ' + (d - 10), 'Qty', 1, 500);
+  add('Puja', 'Flowers', ds(10), 'Day 0', 'kg', 5, 1500);
+  for (let d = 11; d <= 20; d++) add('Puja', 'Flowers', ds(d), 'Day ' + (d - 10), 'kg', d === 18 ? 5 : 3, d === 18 ? 1500 : 1000);
+  for (let d = 11; d <= 20; d++) add('Puja', 'Ammavaru Saree', ds(d), 'Day ' + (d - 10), 'Qty', 1, 500);
+  for (let d = 11; d <= 20; d++) if (d !== 17) add('Daily Prasad', 'Prasad item to be shared', ds(d), 'Morning', 'Kg', 5, 1500);
+  for (let d = 11; d <= 20; d++) add('Daily Prasad', 'Prasad item to be shared', ds(d), 'Evening', 'Kg', 10, 3000);
+  add('Daily Prasad', 'Cylinders', 'All Days', 'Morning', 'Qty', 1, 1000);
+  add('Daily Prasad', 'Cylinders', 'All Days', 'Evening', 'Qty', 3, 3000);
+  [['Rice', 'Kg', 100, 8000], ['Cooking Oil', 'Kg', 45, 8400], ['Curd', 'Kg', 60, 4800],
+   ['Disposables - Paper plates', 'Qty', 1000, 2200], ['Disposables - Water glasses', 'Kg', 2000, 4400],
+   ['Groceries', 'Kg', 100, 8000], ['Vegetables', 'Kg', 100, 5000], ['Cylinders', 'Qty', 4, 4000]]
+    .forEach(x => add('Maha Prasad', x[0], ds(17), 'Morning', x[1], x[2], x[3]));
+  return rows;
+}
