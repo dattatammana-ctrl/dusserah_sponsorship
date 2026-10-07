@@ -11,10 +11,21 @@ const SHEET_ID = '1EGMumiBxnLya47f4eEn-RaWbxNpsW-Fs4RZHKKFRQoQ';   // your Googl
 
 const SHEETS = {
   Items:       { hdr: ['Category', 'Item', 'Date', 'Slot', 'Unit', 'Requirement', 'Est. amount', 'Deleted'], text: [1, 2, 3, 4, 5] },
-  Submissions: { hdr: ['SID', 'Timestamp', 'Donor', 'Phone', 'Tower', 'Flat', 'Item ID', 'Qty', 'Amount'],  text: [1, 2, 3, 4, 5, 6] }
+  External:    { hdr: ['ID', 'Name', 'Amount', 'Date', 'Added'], text: [1, 2, 4, 5] },
+  Submissions: { hdr: ['SID', 'Timestamp', 'Donor', 'Phone', 'Tower', 'Flat', 'Item ID', 'Qty', 'Amount', 'Mode', 'Payment Ref'],  text: [1, 2, 3, 4, 5, 6, 11] }
 };
+/* "Actual cash donations through other source": sum of column L of this sheet (no sign-in needed by donors; the script reads it as you) */
+const OTHER_SHEET_ID = '1N28jKtSsuePNc5PMhAwyuCFXutCJhtWwxljgqoaeLrA';
+const OTHER_TAB = '';        // tab name; '' = first tab
+const OTHER_COL = 12;        // column L
+const OTHER_HEADER_ROWS = 1; // rows to skip at the top
 const FIELD_COL = { cat: 1, item: 2, date: 3, slot: 4, unit: 5, req: 6, est: 7 };
 const EPS = 1e-9;
+// Physical-booking limits: Rice 120%, other Maha Prasad 110%, Daily Prasad 120%, rest 100%. Cash has no limit.
+function capOf_(it) {
+  const c = String(it.cat).trim().toLowerCase(), n = String(it.item).trim().toLowerCase();
+  return it.req * (c === 'maha prasad' ? (n === 'rice' ? 1.2 : 1.1) : c === 'daily prasad' ? 1.2 : 1);
+}
 
 /* ---------- entry points ---------- */
 // GitHub Pages hosts the page; this script is only the data API.
@@ -35,7 +46,8 @@ function handle_(b) {
     if (b.pw !== ADMIN_PASSWORD) throw new Error('Wrong password');
     const a = p.slice(11);
     if (a === 'subs') return subs_();
-    const fn = { 'item': update_, 'item/add': add_, 'item/delete': del_, 'sub/delete': subDel_ }[a];
+    if (a === 'ext') return ext_();
+    const fn = { 'item': update_, 'item/add': add_, 'item/delete': del_, 'sub/delete': subDel_, 'ext/add': extAdd_, 'ext/update': extUpd_, 'ext/delete': extDel_ }[a];
     if (!fn) throw new Error('Not found');
     return locked_(() => fn(b));
   }
@@ -44,7 +56,9 @@ function handle_(b) {
 
 /** Run once: creates both sheets and loads the starting items. */
 function setup() {
-  const sh = sheet_('Items'); sheet_('Submissions');
+  const sh = sheet_('Items'), sb = sheet_('Submissions'); sheet_('External'); otherTab_();
+  if (!sb.getRange(1, 10).getValue()) sb.getRange(1, 10).setValue('Mode').setFontWeight('bold').setBackground('#fde7d0');
+  if (!sb.getRange(1, 11).getValue()) sb.getRange(1, 11).setValue('Payment Ref').setFontWeight('bold').setBackground('#fde7d0');
   if (sh.getLastRow() < 2) append_(sh, seed_());
   CacheService.getScriptCache().remove('state');
 }
@@ -94,15 +108,15 @@ function items_() {
 function subs_() {
   const sh = sheet_('Submissions'), n = sh.getLastRow() - 1;
   if (n < 1) return [];
-  return sh.getRange(2, 1, n, 9).getValues().filter(r => r[0] !== '').map(r => ({
+  return sh.getRange(2, 1, n, 11).getValues().filter(r => r[0] !== '').map(r => ({
     sid: String(r[0]), ts: String(r[1]), donor: String(r[2]), phone: String(r[3]), tower: String(r[4]), flat: String(r[5]),
-    rid: Number(r[6]), qty: Number(r[7]), amt: Number(r[8]) }));
+    rid: Number(r[6]), qty: Number(r[7]), amt: Number(r[8]), mode: String(r[9] || 'Physical'), ref: String(r[10] || '') }));
 }
 
 function state_() {
   const c = CacheService.getScriptCache(), hit = c.get('state');
   if (hit) return JSON.parse(hit);
-  const s = { items: items_(), subs: subs_().map(x => ({ sid: x.sid, rid: x.rid, qty: x.qty, donor: x.donor, amt: x.amt })) }; // no phone/flat publicly
+  const s = { items: items_(), subs: subs_().map(x => ({ sid: x.sid, rid: x.rid, qty: x.qty, amt: x.amt })), other: other_(), ext: ext_().reduce((a, x) => a + x.amt, 0) };   // public gets only the external TOTAL, never names // public: no donor name/phone/flat
   try { c.put('state', JSON.stringify(s), 30); } catch (e) {}
   return s;
 }
@@ -117,6 +131,9 @@ function submit_(b) {
   if (!/^\d{10}$/.test(phone)) throw new Error('Enter a valid 10-digit phone number');
   if (['1', '2', '3', '4', '5'].indexOf(tower) < 0) throw new Error('Select tower (1-5)');
   if (!flat) throw new Error('Enter flat number');
+  const mode = b.mode === 'Cash' ? 'Cash' : 'Physical';
+  const ref = mode === 'Cash' ? String(b.ref || '').trim() : '';
+  if (mode === 'Cash' && !/^[A-Za-z0-9]{8,30}$/.test(ref)) throw new Error('Enter your UPI transaction ID / UTR');
   const need = {};
   (b.lines || []).slice(0, 200).forEach(l => { const q = Number(l.qty), id = Number(l.rid); if (q > 0 && isFinite(q)) need[id] = (need[id] || 0) + q; });
   const ids = Object.keys(need).map(Number);
@@ -126,13 +143,13 @@ function submit_(b) {
   ids.forEach(id => {
     const it = items[id];
     if (!it || it.del) throw new Error('An item in your cart was removed. Please review your cart.');
-    const left = it.req - sponsored_(subs, id);
-    if (need[id] > left + EPS)
-      throw new Error('Only ' + Math.max(left, 0) + ' ' + it.unit + ' left for "' + it.item + '" (' + it.date + '). Someone just sponsored it - please review your cart.');
+    const left = capOf_(it) - sponsored_(subs, id);
+    if (mode === 'Physical' && need[id] > left + EPS)
+      throw new Error('Only ' + Math.max(0, Math.round(left * 1000) / 1000) + ' ' + it.unit + ' left for "' + it.item + '" (' + it.date + '). Someone just sponsored it - reduce the quantity or choose Cash.');
   });
   const ts = new Date().toISOString();
   append_(sheet_('Submissions'), ids.map(id => [Utilities.getUuid(), ts, donor, phone, tower, flat, id,
-    need[id], Math.round(need[id] * items[id].est / items[id].req)]));
+    need[id], Math.round(need[id] * items[id].est / items[id].req), mode, ref]));
   return { ok: true };
 }
 
@@ -141,7 +158,10 @@ function checkField_(f, v, id) {
   if (f === 'req' || f === 'est') {
     v = Number(v);
     if (!isFinite(v) || v < 0 || (f === 'req' && v <= 0)) throw new Error('Invalid number');
-    if (f === 'req') { const sp = sponsored_(subs_(), id); if (v < sp - EPS) throw new Error("Quantity can't be lower than already sponsored (" + sp + ')'); }
+    if (f === 'req') {
+      const sp = sponsored_(subs_(), id), it = items_()[id], m = it ? capOf_({ req: 1, cat: it.cat, item: it.item }) : 1;
+      if (v * m < sp - EPS) throw new Error("Quantity can't be lower than already sponsored (" + sp + ')');
+    }
     return v;
   }
   if (!(f in FIELD_COL)) throw new Error('Bad field');
@@ -178,6 +198,78 @@ function subDel_(b) {
   if (n < 1) return { ok: true };
   const ids = sh.getRange(2, 1, n, 1).getValues();
   for (let i = 0; i < n; i++) if (String(ids[i][0]) === String(b.sid)) { sh.deleteRow(i + 2); break; }
+  return { ok: true };
+}
+
+/* ---------- other-source cash (column L) ----------
+ * Preferred: tab "Other Source" in THIS sheet, filled by IMPORTRANGE (created by setup()). One-time: open that tab and click "Allow access".
+ * Fallback: read the other spreadsheet directly (works if the script owner can open it). */
+function sumCol_(sh, headerRows) {
+  const n = sh.getLastRow() - headerRows;
+  if (n < 1) return 0;
+  let t = 0;
+  sh.getRange(headerRows + 1, 1, n, OTHER_COL).getValues().forEach(r => {
+    if (r.some(c => /total/i.test(String(c)))) return;          // skip any "Total" row so nothing is counted twice
+    const v = r[OTHER_COL - 1];
+    if (String(v).trim() === '') return;
+    const x = typeof v === 'number' ? v : Number(String(v).replace(/[^0-9.\-]/g, ''));
+    if (isFinite(x)) t += x;
+  });
+  return Math.round(t * 100) / 100;
+}
+function other_() {
+  try {
+    const loc = ss_().getSheetByName('Other Source');
+    if (loc && loc.getLastRow() > 1 && !/^#|Loading/i.test(String(loc.getRange(1, 1).getValue()))) return sumCol_(loc, OTHER_HEADER_ROWS);
+  } catch (e) {}
+  try {
+    const ss = SpreadsheetApp.openById(OTHER_SHEET_ID);
+    return sumCol_(OTHER_TAB ? ss.getSheetByName(OTHER_TAB) : ss.getSheets()[0], OTHER_HEADER_ROWS);
+  } catch (e) { return null; }    // null = could not read
+}
+/** Creates the "Other Source" tab with an IMPORTRANGE of columns A:L (called from setup). */
+function otherTab_() {
+  const s = ss_();
+  if (s.getSheetByName('Other Source')) return;
+  const sh = s.insertSheet('Other Source');
+  sh.getRange(1, 1).setFormula('=IMPORTRANGE("https://docs.google.com/spreadsheets/d/' + OTHER_SHEET_ID + '","' + (OTHER_TAB ? OTHER_TAB + '!' : '') + 'A:L")');
+}
+
+/* ---------- external sponsorship (admin only) ---------- */
+function ext_() {
+  const sh = sheet_('External'), n = sh.getLastRow() - 1;
+  if (n < 1) return [];
+  return sh.getRange(2, 1, n, 5).getValues().filter(r => r[0] !== '').map(r => ({
+    id: String(r[0]), name: String(r[1]), amt: Number(r[2]),
+    date: r[3] instanceof Date ? Utilities.formatDate(r[3], Session.getScriptTimeZone(), 'yyyy-MM-dd') : String(r[3]) }));
+}
+function extAdd_(b) {
+  const name = String(b.name || '').trim().slice(0, 80), amt = Number(b.amt), date = String(b.date || '').trim();
+  if (!name) throw new Error('Enter donor name');
+  if (!isFinite(amt) || amt <= 0) throw new Error('Enter a valid amount');
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new Error('Select a date');
+  append_(sheet_('External'), [[Utilities.getUuid(), name, Math.round(amt * 100) / 100, date, new Date().toISOString()]]);
+  return { ok: true };
+}
+function extUpd_(b) {
+  const sh = sheet_('External'), n = sh.getLastRow() - 1;
+  const name = String(b.name || '').trim().slice(0, 80), amt = Number(b.amt), date = String(b.date || '').trim();
+  if (!name) throw new Error('Enter donor name');
+  if (!isFinite(amt) || amt <= 0) throw new Error('Enter a valid amount');
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new Error('Select a date');
+  if (n < 1) throw new Error('Entry not found');
+  const ids = sh.getRange(2, 1, n, 1).getValues();
+  for (let i = 0; i < n; i++) if (String(ids[i][0]) === String(b.id)) {
+    sh.getRange(i + 2, 2, 1, 3).setValues([[name, Math.round(amt * 100) / 100, date]]);
+    return { ok: true };
+  }
+  throw new Error('Entry not found');
+}
+function extDel_(b) {
+  const sh = sheet_('External'), n = sh.getLastRow() - 1;
+  if (n < 1) return { ok: true };
+  const ids = sh.getRange(2, 1, n, 1).getValues();
+  for (let i = 0; i < n; i++) if (String(ids[i][0]) === String(b.id)) { sh.deleteRow(i + 2); break; }
   return { ok: true };
 }
 
