@@ -47,8 +47,8 @@ a.btn{display:inline-block;background:var(--p);color:#fff;padding:11px 18px;bord
 <div class="card"><h2>1. Select Item &amp; Dates</h2>
 <div class="row"><label>Category<select id="cat"></select></label><label>Item<select id="item"></select></label></div><br>
 <div id="calWrap"></div>
-<div class="legend"><span><i style="background:#fde7e7"></i>Pending</span><span><i style="background:var(--p)"></i>Selected</span><span><i style="background:#e6f4ea"></i>Fully sponsored</span></div><br>
-<div class="scroll" style="max-height:260px"><table id="slots"><thead><tr><th></th><th>Date</th><th>Slot</th><th class="n">Pending Qty</th><th class="n">Pending ₹</th></tr></thead><tbody></tbody></table></div><br>
+<div class="legend"><span><i style="background:#fde7e7"></i>Available</span><span><i style="background:var(--p)"></i>Selected</span></div><br>
+<div class="scroll" style="max-height:260px"><table id="slots"><thead><tr><th></th><th>Date</th><th>Slot</th><th class="n">Qty needed</th><th class="n">Est. ₹</th></tr></thead><tbody></tbody></table></div><br>
 <button onclick="addCart()">🛒 Add selected to cart</button></div>
 
 <div class="card"><h2>2. Contribution Cart</h2>
@@ -56,6 +56,7 @@ a.btn{display:inline-block;background:var(--p);color:#fff;padding:11px 18px;bord
 <p class="right"><b>Total sponsorship: <span id="ctot">₹0</span></b></p>
 <div class="row"><label>Donor name *<input id="dn"></label><label>Phone *<input id="dp" type="tel" inputmode="numeric" maxlength="10" placeholder="10-digit number" style="width:140px"></label><label>Tower *<select id="dt"><option value="">Select</option><option>1</option><option>2</option><option>3</option><option>4</option><option>5</option></select></label><label>Flat No. *<input id="df" style="width:90px" placeholder="e.g. 304"></label><button onclick="openPay()">✔ Submit sponsorship</button></div></div>
 </div>
+<div class="card" id="terms"><h2>Notes &amp; Terms</h2><div id="termsList"></div></div>
 </main>
 
 <div class="modal" id="am"><div>
@@ -86,12 +87,15 @@ async function load(quiet){const s=await api('/api/state',null,quiet);R=s.items;
 function fixCart(){cart=cart.filter(c=>R[c.rid]&&!R[c.rid].del&&c.qty>0)}
 const toast=m=>{const t=$('#toast');t.textContent=m;t.style.display='block';setTimeout(()=>t.style.display='none',2500)};
 const unitP=r=>r.est/r.req;
-const spQty=r=>subs.filter(s=>s.rid==r.id).reduce((a,s)=>a+s.qty,0);
+const spQty=r=>+subs.filter(s=>s.rid==r.id).reduce((a,s)=>a+s.qty,0).toFixed(4);
+const inCartAny=r=>cart.some(c=>c.rid==r.id);
 const inCart=r=>cart.filter(c=>c.rid==r.id).reduce((a,c)=>a+c.qty,0);
 const capMul=r=>{const c=String(r.cat).trim().toLowerCase(),n=String(r.item).trim().toLowerCase();return c=='maha prasad'?(n=='rice'?1.2:1.1):c=='daily prasad'?1.2:1}; // physical-booking limit (cash has no limit)
 const cap=r=>r.req*capMul(r);
-const pend=r=>Math.max(0,r.req-spQty(r));                 // pending to reach 100%
+const pend=r=>+Math.max(0,r.req-spQty(r)).toFixed(4);                 // pending to reach 100%
 const room=r=>Math.max(0,+(cap(r)-spQty(r)).toFixed(6));    // physical qty still allowed
+const TERMS=['One item can be contributed by multiple donors.','Sponsored items are not guaranteed to be returned to individuals after the celebrations, as they belong to the committee.','Any amount received in excess of the cost of the items purchased will be used towards the overall expenditure.'];
+const termsList=()=>'<ul style="margin:6px 0 0 18px;padding:0">'+TERMS.map(t=>`<li>${t}</li>`).join('')+'</ul>';
 const key=r=>r.cat+'|'+r.item;
 const CAT_ORDER=['puja','daily prasad','maha prasad','immersion','stage','facilities','others'];
 const catRank=c=>{const i=CAT_ORDER.indexOf(String(c).trim().toLowerCase());return i<0?CAT_ORDER.length-0.5:i};   // unknown categories sit just before/after Others by name
@@ -126,6 +130,7 @@ async function showSum(){   // admin view: full detail (donor names come from th
   <td><div class="bar"><i style="width:${Math.min(100,x.pct)}%"></i></div>${x.pct.toFixed(0)}%</td><td>${tags(x)}</td></tr>`).join('')+'</tbody></table></div>';
 }
 async function init(){
+  $('#termsList').innerHTML=termsList();
   try{await load()}catch(e){$('#kpis').innerHTML='<div class="kpi"><b>⚠ Server not reachable</b><span>Check your internet connection and try again.</span></div>';return}
   $('#cat').onchange=()=>{fillItems();sel.clear();renderPick()};$('#item').onchange=()=>{sel.clear();renderPick();renderSummary()};
   refreshDD();renderAll();setInterval(poll,20000);
@@ -135,7 +140,7 @@ async function poll(){
   const before=JSON.stringify([R,subs,OTHER,EXTP]),keep=[...sel];
   try{await load(true)}catch(e){return}
   if(JSON.stringify([R,subs,OTHER,EXTP])===before)return;
-  fixCart();refreshDD();keep.forEach(i=>{const r=R[i];if(r&&!r.del&&room(r)-inCart(r)>0)sel.add(i)});renderAll();
+  fixCart();refreshDD();keep.forEach(i=>{const r=R[i];if(r&&!r.del&&!cart.some(c=>c.rid==i))sel.add(i)});renderAll();
 }
 function fillItems(){const items=[...new Set(A().filter(r=>r.cat==$('#cat').value).map(r=>r.item))];$('#item').innerHTML=items.map(i=>`<option>${i}</option>`).join('')}
 function pick(c,i){$('#cat').value=c;fillItems();$('#item').value=i;sel.clear();renderPick();renderSummary();$('#calWrap').scrollIntoView({behavior:'smooth',block:'center'})}
@@ -146,23 +151,22 @@ function renderPick(){
   let h='<div class="cal">'+'SMTWTFS'.split('').map(d=>`<div class="h">${d}</div>`).join('')+'<div style="padding:0"></div>'.repeat(off);
   for(let d=1;d<=31;d++){
     const dr=rs.filter(r=>r.day==d);let c='',oc='';
-    if(dr.length){const open=dr.filter(r=>room(r)-inCart(r)>0&&r.day);
-      if(!open.length)c='full';else if(dr.some(r=>sel.has(r.id)))c='sl',oc=`onclick="togDay(${d})"`;else c='av',oc=`onclick="togDay(${d})"`}
+    if(dr.length){c=dr.some(r=>sel.has(r.id))?'sl':'av';oc=`onclick="togDay(${d})"`}
     h+=`<div class="${c}" ${oc}>${d}</div>`}
   $('#calWrap').innerHTML=`<b>October 2026</b> <span class="muted">${multi?'– click dates to select':'– single date item'}</span>${h}</div>`;
-  $('#slots tbody').innerHTML=rs.map(r=>{const p=room(r)-inCart(r),pp=Math.max(0,pend(r)-inCart(r));return `<tr><td><input type="checkbox" ${p<=0?'disabled':''} ${sel.has(r.id)?'checked':''} onchange="togRow(${r.id})"></td>
-   <td>${r.date}</td><td>${r.slot}</td><td class="n">${p>0?(pp>0?pp+' '+r.unit:'<span class="tag">Target met</span>')+(cap(r)>r.req?`<br><small class="muted">up to ${+p.toFixed(3)} ${r.unit} more allowed</small>`:''):'<span class="tag">Sponsored</span>'}</td><td class="n">${inr(pp*unitP(r))}</td></tr>`}).join('');
+  $('#slots tbody').innerHTML=rs.map(r=>{const ic=inCartAny(r);return `<tr><td><input type="checkbox" ${ic?'disabled':''} ${sel.has(r.id)?'checked':''} onchange="togRow(${r.id})"></td>
+   <td>${r.date}</td><td>${r.slot}</td><td class="n">${r.req} ${r.unit}${ic?' <span class="tag">In cart</span>':''}</td><td class="n">${inr(r.est)}</td></tr>`}).join('');
 }
 function togRow(i){sel.has(i)?sel.delete(i):sel.add(i);renderPick()}
-function togDay(d){const rs=cur().filter(r=>r.day==d&&room(r)-inCart(r)>0);const all=rs.every(r=>sel.has(r.id));rs.forEach(r=>all?sel.delete(r.id):sel.add(r.id));renderPick()}
+function togDay(d){const rs=cur().filter(r=>r.day==d&&!inCartAny(r));const all=rs.every(r=>sel.has(r.id));rs.forEach(r=>all?sel.delete(r.id):sel.add(r.id));renderPick()}
 function addCart(){
   if(!sel.size)return toast('Select at least one date/slot');
-  sel.forEach(i=>{const r=R[i],rm=room(r)-inCart(r),pp=pend(r)-inCart(r);if(rm>0)cart.push({rid:i,qty:+(pp>0?pp:rm).toFixed(6)})});
+  sel.forEach(i=>{const r=R[i];if(r&&!r.del&&!inCartAny(r)){const pp=pend(r),rm=room(r);cart.push({rid:i,qty:+(pp>0?pp:rm>0?rm:r.req).toFixed(6)})}});
   sel.clear();renderPick();renderCart();toast('Added to cart');
 }
 function renderCart(){
   $('#cart tbody').innerHTML=cart.length?cart.map((c,n)=>{const r=R[c.rid];return `<tr><td>${r.item}</td><td>${r.date} · ${r.slot}</td>
-   <td><input type="number" min="0" step="any" value="${c.qty}" style="width:80px" onchange="setQty(${n},this.value)"> ${r.unit}${c.qty>room(r)+1e-9?'<br><small style="color:#b3261e">above physical limit – cash only</small>':''}</td><td class="n">${inr(c.qty*unitP(r))}</td><td><button class="s" onclick="cart.splice(${n},1);renderAll()">✕</button></td></tr>`}).join('')
+   <td><input type="number" min="0" step="any" value="${c.qty}" style="width:80px" onchange="setQty(${n},this.value)"> ${r.unit}</td><td class="n">${inr(c.qty*unitP(r))}</td><td><button class="s" onclick="cart.splice(${n},1);renderAll()">✕</button></td></tr>`}).join('')
    :'<tr><td colspan="5" class="muted">Cart is empty</td></tr>';
   $('#ctot').textContent=inr(cart.reduce((a,c)=>a+c.qty*unitP(R[c.rid]),0));
 }
@@ -172,6 +176,11 @@ const UPI_ID='Q099884932@ybl',UPI_NAME='FIVE STAR Ventures',QR_SRC='data:image/j
 let mode='Physical',payShot='';
 const isMobile=()=>/Android|iPhone|iPad|iPod/i.test(navigator.userAgent)||(window.matchMedia&&matchMedia('(pointer:coarse)').matches&&innerWidth<900);
 const cartTotal=()=>cart.filter(c=>c.qty>0).reduce((a,c)=>a+c.qty*unitP(R[c.rid]),0);
+let cashAmt=[];
+const defaultCash=()=>lines().map(c=>Math.max(1,Math.round(c.qty*unitP(R[c.rid]))));
+const lines=()=>cart.filter(c=>c.qty>0);
+const payTotal=()=>mode=='Cash'?lines().reduce((a,c,i)=>a+(+cashAmt[i]||0),0):cartTotal();
+function setCash(i,v){v=Math.round(+v);if(!(v>=1)){toast('Minimum amount is ₹1');return renderPay()}cashAmt[i]=v;renderPay()}
 const overLines=()=>cart.filter(c=>c.qty>room(R[c.rid])+1e-9);
 const form=()=>({donor:$('#dn').value.trim(),phone:$('#dp').value.trim(),tower:$('#dt').value,flat:$('#df').value.trim()});
 function checkForm(){
@@ -179,15 +188,18 @@ function checkForm(){
   if(!cart.some(c=>c.qty>0))return 'Cart is empty';if(!f.donor)return 'Enter donor name';
   if(!/^\d{10}$/.test(f.phone))return 'Enter a valid 10-digit phone number';
   if(!f.tower)return 'Select tower (1-5)';if(!f.flat)return 'Enter flat number';return ''}
-function openPay(){const e=checkForm();if(e)return toast(e);mode='Physical';payShot='';renderPay();$('#pm').classList.add('on')}
+function openPay(){const e=checkForm();if(e)return toast(e);mode='Physical';payShot='';cashAmt=defaultCash();renderPay();$('#pm').classList.add('on')}
 function closePay(){$('#pm').classList.remove('on')}
 function setMode(m){mode=m;renderPay()}
 function renderPay(){
-  const tot=Math.round(cartTotal()),over=overLines(),mob=isMobile();
+  if(cashAmt.length!==lines().length)cashAmt=defaultCash();
+  const tot=Math.round(payTotal()),over=overLines(),mob=isMobile();
   const link=`upi://pay?pa=${encodeURIComponent(UPI_ID)}&pn=${encodeURIComponent(UPI_NAME)}&am=${tot}.00&cu=INR&tn=${encodeURIComponent('Dusserah 2026 sponsorship')}`;
-  const physical=over.length?`<p style="color:#b3261e">⚠ These exceed the allowed limit for physical items: <b>${over.map(c=>R[c.rid].item+' ('+R[c.rid].date+')').join(', ')}</b>. Reduce the quantity, or choose Cash.</p>`
+  const physical=over.length?`<div style="margin-top:8px;padding:10px;border:1px solid #f0c36d;background:#fff8e1;border-radius:8px"><b>Physical quantity limit exceeded</b> for ${over.map(c=>esc(R[c.rid].item)+' ('+esc(R[c.rid].date)+')').join(', ')}.<br>Please contribute by cash for these items instead.<br><button style="margin-top:6px" onclick="setMode('Cash')">Switch to Cash</button></div>`
      :`<p class="muted">Please bring the selected items to the venue on the sponsored date(s).</p>`;
-  const cash=`<div style="text-align:center;margin-top:8px"><div style="font-size:18px">Pay <b>${inr(tot)}</b> to <b>${UPI_NAME}</b></div>
+  const cash=`<div style="text-align:left;margin-top:8px"><div class="muted">You can change the amount for any item (for example ₹116 or ₹516 instead of ₹500):</div>
+    <table style="margin-top:4px"><tbody>${lines().map((c,i)=>{const r=R[c.rid];return `<tr><td>${esc(r.item)}<br><small class="muted">${esc(r.date)} · ${esc(r.slot)} · suggested ${inr(c.qty*unitP(r))}</small></td><td class="n" style="white-space:nowrap">₹ <input type="number" min="1" step="1" value="${cashAmt[i]}" style="width:100px" onchange="setCash(${i},this.value)"></td></tr>`}).join('')}</tbody></table></div>
+    <div style="text-align:center;margin-top:8px"><div style="font-size:18px">Pay <b>${inr(tot)}</b> to <b>${UPI_NAME}</b></div>
     ${mob?`<a class="btn" href="${link}">📱 Pay ${inr(tot)} with UPI app</a>`:`<img src="${QR_SRC}" alt="UPI QR" style="width:230px;max-width:70%;margin-top:6px"><div class="muted">Scan with any UPI app and pay ${inr(tot)}</div>`}
     <div style="margin-top:6px">UPI ID: <b>${UPI_ID}</b> <button class="s" onclick="copyUpi()">Copy</button></div>
     <div style="text-align:left;margin-top:10px"><div class="muted">After paying, upload a screenshot of the payment <b style="color:#b3261e">* required</b></div>
@@ -197,6 +209,7 @@ function renderPay(){
     <label class="opt ${mode=='Physical'?'on':''}"><input type="radio" name="pmode" ${mode=='Physical'?'checked':''} onchange="setMode('Physical')">I will bring the physical items</label>
     <label class="opt ${mode=='Cash'?'on':''}"><input type="radio" name="pmode" ${mode=='Cash'?'checked':''} onchange="setMode('Cash')">I will pay cash (UPI) instead</label>
     ${mode=='Cash'?cash:physical}
+    <div class="muted" style="font-size:12px;margin-top:10px;text-align:left"><b>Terms:</b>${termsList()}<div style="margin-top:4px">By submitting, you accept these terms.</div></div>
     <div class="row" style="margin-top:12px"><button onclick="confirmSubmit()">✔ Confirm &amp; Submit</button><button class="s" onclick="closePay()">Back</button></div>`;
 }
 function pickShot(inp){
@@ -225,14 +238,15 @@ async function copyUpi(){
 async function confirmSubmit(){
   if(busy)return;
   const e=checkForm();if(e)return toast(e);
-  if(mode=='Physical'&&overLines().length)return toast('Some quantities exceed the physical limit – reduce them or choose Cash');
+  if(mode=='Physical'&&overLines().length){setMode('Cash');return toast('Physical quantity limit exceeded for '+overLines().map(c=>R[c.rid].item).join(', ')+'. Please contribute by cash instead.')}
+  if(mode=='Cash'&&!(payTotal()>=1&&lines().every((c,i)=>cashAmt[i]>=1)))return toast('Enter an amount (minimum ₹1) for each item');
   if(mode=='Cash'&&!payShot)return toast('Please upload your payment screenshot');
-  busy=true;
-  try{await api('/api/submit',Object.assign(form(),{mode,shot:mode=='Cash'?payShot:'',lines:cart.filter(c=>c.qty>0)}));
+  busy=true;let redir=false;
+  try{await api('/api/submit',Object.assign(form(),{mode,shot:mode=='Cash'?payShot:'',lines:lines().map((c,i)=>mode=='Cash'?{rid:c.rid,qty:c.qty,amt:cashAmt[i]}:{rid:c.rid,qty:c.qty})}));
     cart=[];$('#dn').value=$('#dp').value=$('#df').value='';$('#dt').value='';closePay();toast('Contribution submitted. Thank you! 🙏')}
-  catch(x){toast(x.message)}
+  catch(x){if(mode=='Physical'&&/choose Cash/i.test(x.message)){mode='Cash';redir=true;toast('Physical quantity limit exceeded. Please contribute by cash instead.')}else toast(x.message)}
   try{await load()}catch(x){}
-  busy=false;fixCart();refreshDD();renderAll();
+  busy=false;fixCart();refreshDD();renderAll();if(redir)renderPay();
 }
 /* Admin */
 function adminOpen(){$('#am').classList.add('on');if(isAdmin)showAdmin();else{$('#login').style.display='';$('#panel').style.display='none';$('#pw').value='';$('#pw').focus()}}

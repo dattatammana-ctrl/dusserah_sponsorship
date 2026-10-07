@@ -12,7 +12,7 @@ const SHEET_ID = '1EGMumiBxnLya47f4eEn-RaWbxNpsW-Fs4RZHKKFRQoQ';   // your Googl
 const SHEETS = {
   Items:       { hdr: ['Category', 'Item', 'Date', 'Slot', 'Unit', 'Requirement', 'Est. amount', 'Deleted'], text: [1, 2, 3, 4, 5] },
   External:    { hdr: ['ID', 'Name', 'Amount', 'Date', 'Added'], text: [1, 2, 4, 5] },
-  Submissions: { hdr: ['SID', 'Timestamp', 'Donor', 'Phone', 'Tower', 'Flat', 'Item ID', 'Qty', 'Amount', 'Mode', 'Payment Screenshot'],  text: [1, 2, 3, 4, 5, 6, 11] }
+  Submissions: { hdr: ['SID', 'Timestamp', 'Donor', 'Phone', 'Tower', 'Flat', 'Item Details', 'Qty', 'Amount', 'Mode', 'Payment Screenshot', 'Item Ref (do not edit)'],  text: [1, 2, 3, 4, 5, 6, 11] }
 };
 /* "Actual cash donations through other source": sum of column L of this sheet (no sign-in needed by donors; the script reads it as you) */
 const OTHER_SHEET_ID = '1N28jKtSsuePNc5PMhAwyuCFXutCJhtWwxljgqoaeLrA';
@@ -61,6 +61,7 @@ function setup() {
   if (!sb.getRange(1, 10).getValue()) sb.getRange(1, 10).setValue('Mode').setFontWeight('bold').setBackground('#fde7d0');
   sb.getRange(1, 11).setValue('Payment Screenshot').setFontWeight('bold').setBackground('#fde7d0');
   shotFolder_();   // creates the private Drive folder (also asks for Drive permission)
+  migrateSubs_();  // old rows: replace numeric Item ID with readable item details
   if (sh.getLastRow() < 2) append_(sh, seed_());
   CacheService.getScriptCache().remove('state');
 }
@@ -110,9 +111,9 @@ function items_() {
 function subs_() {
   const sh = sheet_('Submissions'), n = sh.getLastRow() - 1;
   if (n < 1) return [];
-  return sh.getRange(2, 1, n, 11).getValues().filter(r => r[0] !== '').map(r => ({
+  return sh.getRange(2, 1, n, 12).getValues().filter(r => r[0] !== '').map(r => ({
     sid: String(r[0]), ts: String(r[1]), donor: String(r[2]), phone: String(r[3]), tower: String(r[4]), flat: String(r[5]),
-    rid: Number(r[6]), qty: Number(r[7]), amt: Number(r[8]), mode: String(r[9] || 'Physical'), ref: String(r[10] || '') }));
+    rid: (r[11] !== '' && r[11] != null) ? Number(r[11]) : Number(r[6]), qty: Number(r[7]), amt: Number(r[8]), mode: String(r[9] || 'Physical'), ref: String(r[10] || '') }));
 }
 
 function state_() {
@@ -135,8 +136,15 @@ function submit_(b) {
   if (!flat) throw new Error('Enter flat number');
   const mode = b.mode === 'Cash' ? 'Cash' : 'Physical';
   if (mode === 'Cash' && !b.shot) throw new Error('Please upload your payment screenshot');
-  const need = {};
-  (b.lines || []).slice(0, 200).forEach(l => { const q = Number(l.qty), id = Number(l.rid); if (q > 0 && isFinite(q)) need[id] = (need[id] || 0) + q; });
+  const need = {}, cash = {};
+  (b.lines || []).slice(0, 200).forEach(l => {
+    const q = Number(l.qty), id = Number(l.rid);
+    if (mode === 'Cash') {                       // cash: donor chooses the rupee amount per line
+      const a = Math.round(Number(l.amt));
+      if (!isFinite(a) || a < 1 || a > 10000000) throw new Error('Enter a valid amount (minimum \u20b91) for each item');
+      cash[id] = (cash[id] || 0) + a; need[id] = 0;
+    } else if (q > 0 && isFinite(q)) need[id] = (need[id] || 0) + q;
+  });
   const ids = Object.keys(need).map(Number);
   if (!ids.length) throw new Error('Cart is empty');
 
@@ -144,14 +152,19 @@ function submit_(b) {
   ids.forEach(id => {
     const it = items[id];
     if (!it || it.del) throw new Error('An item in your cart was removed. Please review your cart.');
+    if (mode === 'Cash') {                       // cash has no limit; store the share of the item that the amount covers
+      if (!(it.est > 0)) throw new Error('"' + it.item + '" has no estimated cost, so cash cannot be accepted for it.');
+      need[id] = Math.round(cash[id] * it.req / it.est * 1e6) / 1e6;
+      return;
+    }
     const left = capOf_(it) - sponsored_(subs, id);
     if (mode === 'Physical' && need[id] > left + EPS)
       throw new Error('Only ' + Math.max(0, Math.round(left * 1000) / 1000) + ' ' + it.unit + ' left for "' + it.item + '" (' + it.date + '). Someone just sponsored it - reduce the quantity or choose Cash.');
   });
   const ref = mode === 'Cash' ? saveShot_(b.shot, donor) : '';   // Drive link of the payment screenshot
   const ts = new Date().toISOString();
-  append_(sheet_('Submissions'), ids.map(id => [Utilities.getUuid(), ts, donor, phone, tower, flat, id,
-    need[id], Math.round(need[id] * items[id].est / items[id].req), mode, ref]));
+  append_(sheet_('Submissions'), ids.map(id => [Utilities.getUuid(), ts, donor, phone, tower, flat, detail_(items[id]),
+    need[id], mode === 'Cash' ? cash[id] : Math.round(need[id] * items[id].est / items[id].req), mode, ref, id]));
   return { ok: true };
 }
 
@@ -235,6 +248,28 @@ function otherTab_() {
   if (s.getSheetByName('Other Source')) return;
   const sh = s.insertSheet('Other Source');
   sh.getRange(1, 1).setFormula('=IMPORTRANGE("https://docs.google.com/spreadsheets/d/' + OTHER_SHEET_ID + '","' + (OTHER_TAB ? OTHER_TAB + '!' : '') + 'A:L")');
+}
+
+/* ---------- readable item details in Submissions ---------- */
+function detail_(it) { return [it.cat, it.item, it.date, it.slot].join(' | '); }
+// Column G = readable details; column L (hidden) = numeric item reference used by the app. Safe to run repeatedly.
+function migrateSubs_() {
+  const sh = sheet_('Submissions'), H = SHEETS.Submissions.hdr;
+  const hr = sh.getRange(1, 1, 1, H.length); hr.setValues([H]); hr.setFontWeight('bold').setBackground('#fde7d0');
+  const n = sh.getLastRow() - 1;
+  if (n >= 1) {
+    const items = items_(), g = sh.getRange(2, 7, n, 1).getValues(), l = sh.getRange(2, 12, n, 1).getValues();
+    let ch = false;
+    for (let i = 0; i < n; i++) {
+      const empty = l[i][0] === '' || l[i][0] == null, v = g[i][0];
+      if (empty && v !== '' && v != null && isFinite(Number(v))) {
+        const id = Number(v), it = items[id];
+        l[i][0] = id; g[i][0] = it ? detail_(it) : 'Item #' + id; ch = true;
+      }
+    }
+    if (ch) { sh.getRange(2, 7, n, 1).setValues(g); sh.getRange(2, 12, n, 1).setValues(l); }
+  }
+  sh.hideColumns(12);
 }
 
 /* ---------- payment screenshots (private Drive folder; viewable only through the admin password) ---------- */
