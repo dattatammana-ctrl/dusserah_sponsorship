@@ -122,12 +122,14 @@ function subs_() {
 function state_() {
   const c = CacheService.getScriptCache(), hit = c.get('state');
   if (hit) return JSON.parse(hit);
-  const s = { items: items_(), subs: subs_().map(x => ({ sid: x.sid, rid: x.rid, qty: x.qty, amt: x.amt })), other: other_(), ext: ext_().reduce((a, x) => a + x.amt, 0) };   // public gets only the external TOTAL, never names // public: no donor name/phone/flat
+  const s = { items: items_(), subs: subs_().map(x => ({ sid: x.sid, rid: x.rid, qty: x.qty, amt: x.amt, pq: x.mode === 'Cash' ? 0 : x.qty })), other: other_(), ext: ext_().reduce((a, x) => a + x.amt, 0) };   // public gets only the external TOTAL, never names // public: no donor name/phone/flat
   try { c.put('state', JSON.stringify(s), 30); } catch (e) {}
   return s;
 }
 
 function sponsored_(subs, rid) { return subs.reduce((a, s) => a + (s.rid === rid ? s.qty : 0), 0); }
+// Only PHYSICAL bookings count toward the physical-quantity limit; cash has no limit and never uses it up.
+function physical_(subs, rid) { return subs.reduce((a, s) => a + (s.rid === rid && s.mode !== 'Cash' ? s.qty : 0), 0); }
 
 /* ---------- donor submit ---------- */
 function submit_(b) {
@@ -160,7 +162,7 @@ function submit_(b) {
       need[id] = Math.round(cash[id] * it.req / it.est * 1e6) / 1e6;
       return;
     }
-    const left = capOf_(it) - sponsored_(subs, id);
+    const left = capOf_(it) - physical_(subs, id);
     if (mode === 'Physical' && need[id] > left + EPS)
       throw new Error('Only ' + Math.max(0, Math.round(left * 1000) / 1000) + ' ' + it.unit + ' left for "' + it.item + '" (' + it.date + '). Someone just sponsored it - reduce the quantity or choose Cash.');
   });
@@ -177,7 +179,7 @@ function checkField_(f, v, id) {
     v = Number(v);
     if (!isFinite(v) || v < 0 || (f === 'req' && v <= 0)) throw new Error('Invalid number');
     if (f === 'req') {
-      const sp = sponsored_(subs_(), id), it = items_()[id], m = it ? capOf_({ req: 1, cat: it.cat, item: it.item }) : 1;
+      const sp = physical_(subs_(), id), it = items_()[id], m = it ? capOf_({ req: 1, cat: it.cat, item: it.item }) : 1;
       if (v * m < sp - EPS) throw new Error("Quantity can't be lower than already sponsored (" + sp + ')');
     }
     return v;

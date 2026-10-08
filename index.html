@@ -100,7 +100,8 @@ const inCart=r=>cart.filter(c=>c.rid==r.id).reduce((a,c)=>a+c.qty,0);
 const capMul=r=>{const c=String(r.cat).trim().toLowerCase(),n=String(r.item).trim().toLowerCase();return c=='maha prasad'?(n=='rice'?1.2:1.1):c=='daily prasad'?1.2:1}; // physical-booking limit (cash has no limit)
 const cap=r=>r.req*capMul(r);
 const pend=r=>+Math.max(0,r.req-spQty(r)).toFixed(4);                 // pending to reach 100%
-const room=r=>Math.max(0,+(cap(r)-spQty(r)).toFixed(6));    // physical qty still allowed
+const physQty=r=>+subs.filter(s=>s.rid==r.id).reduce((a,s)=>a+(s.pq!=null?s.pq:s.qty),0).toFixed(4);   // cash does not use up the physical limit
+const room=r=>Math.max(0,+(cap(r)-physQty(r)).toFixed(6));    // physical qty still allowed
 const TERMS=['One item can be contributed by multiple donors.','Sponsored items are not guaranteed to be returned to individuals after the celebrations, as they belong to the committee.','Any amount received in excess of the cost of the items purchased will be used towards the overall expenditure.'];
 const termsList=()=>'<ul style="margin:6px 0 0 18px;padding:0">'+TERMS.map(t=>`<li>${t}</li>`).join('')+'</ul>';
 const key=r=>r.cat+'|'+r.item;
