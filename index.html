@@ -34,6 +34,7 @@ a.btn{display:inline-block;background:var(--p);color:#fff;padding:11px 18px;bord
 #ld{position:fixed;inset:0;background:#fff8f0cc;display:none;align-items:center;justify-content:center;flex-direction:column;gap:12px;z-index:50;font-weight:600;color:var(--p)}
 #ld.on{display:flex}#ld i{width:46px;height:46px;border:5px solid #f1d9c4;border-top-color:var(--p);border-radius:50%;animation:sp .8s linear infinite}
 @keyframes sp{to{transform:rotate(360deg)}}
+#em{z-index:60}
 </style></head><body>
 <div id="ld"><i></i><span id="ldt">Loading…</span></div>
 <header><div><h1>🪔 OnCloud33 Dusserah 2026</h1><div style="opacity:.9;font-size:13px">Item-wise Sponsorship Tracker</div></div><button class="s" onclick="adminOpen()">🔒 Admin View</button></header>
@@ -64,6 +65,7 @@ a.btn{display:inline-block;background:var(--p);color:#fff;padding:11px 18px;bord
 <div id="panel" style="display:none"><div class="row" style="justify-content:space-between"><h2>Admin</h2><div class="row"><button onclick="exportCsv()">⬇ Export CSV</button><button class="s" onclick="closeM()">Close</button></div></div>
 <div id="adm"></div></div></div></div>
 <div class="modal" id="pm"><div style="width:min(520px,94vw)"><div id="pay"></div></div></div>
+<div class="modal" id="em"><div style="width:min(460px,94vw)"><h2 style="color:#b3261e">⚠ <span id="emt"></span></h2><p id="emm" style="white-space:pre-line"></p><div class="row"><button onclick="closeErr()">OK</button></div></div></div>
 <div class="toast" id="toast"></div>
 
 <script>
@@ -78,13 +80,18 @@ async function api(path,body,quiet){
   if(!quiet)busyOn(path=='/api/submit'?'Submitting your contribution…':path=='/api/state'?'Loading…':'Saving…');
   try{return await api0(path,body)}finally{if(!quiet)busyOff()}}
 async function api0(path,body){
+  const ctl=new AbortController(),tm=setTimeout(()=>ctl.abort(),60000);
   let r;
-  try{r=await fetch(API_URL,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify(Object.assign({path,pw:PW},body||{}))})}
-  catch(e){throw new Error('Cannot reach server')}
+  try{r=await fetch(API_URL,{method:'POST',signal:ctl.signal,headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify(Object.assign({path,pw:PW},body||{}))})}
+  catch(e){clearTimeout(tm);const t=e&&e.name=='AbortError',x=new Error(t?(path=='/api/submit'?'The server did not respond in time, so we could not confirm your submission.\n\nPlease do not submit again straight away. Check your internet, then contact the committee to confirm whether it was received before retrying.':'The server is taking too long to respond. Please check your internet and try again.'):'Cannot reach the server. Please check your internet connection and try again.');x.timeout=t;x.network=!t;throw x}
+  clearTimeout(tm);
   const j=await r.json().catch(()=>({error:'Server error'}));
   if(j&&j.error)throw new Error(j.error);return j}
 async function load(quiet){const s=await api('/api/state',null,quiet);R=s.items;subs=s.subs;OTHER=s.other;EXTP=s.ext||0}
 function fixCart(){cart=cart.filter(c=>R[c.rid]&&!R[c.rid].del&&c.qty>0)}
+const showErr=(t,m)=>{$('#emt').textContent=t;$('#emm').textContent=m;$('#em').classList.add('on')};
+const closeErr=()=>$('#em').classList.remove('on');
+const fail=(e,t)=>e&&(e.timeout||e.network)?showErr(t||'Connection problem',e.message):toast(e.message);
 const toast=m=>{const t=$('#toast');t.textContent=m;t.style.display='block';setTimeout(()=>t.style.display='none',2500)};
 const unitP=r=>r.est/r.req;
 const spQty=r=>+subs.filter(s=>s.rid==r.id).reduce((a,s)=>a+s.qty,0).toFixed(4);
@@ -107,23 +114,27 @@ function summaryData(S=subs){
   return Object.entries(g).map(([k,rs])=>{
     const [cat,item]=k.split('|');
     const req=rs.reduce((a,r)=>a+r.req,0), est=rs.reduce((a,r)=>a+r.est,0);
-    const sa=rs.reduce((a,r)=>a+spQty(r)*unitP(r),0), pq=rs.reduce((a,r)=>a+pend(r),0);
+    const ids=new Set(rs.map(r=>r.id)), sa=S.filter(s=>ids.has(s.rid)).reduce((a,s)=>a+(+s.amt||0),0), pq=rs.reduce((a,r)=>a+pend(r),0);
     const u=[...new Set(rs.map(r=>r.unit))].join('/');
     const names=[...new Set(S.filter(s=>rs.some(r=>r.id==s.rid)&&s.donor).map(s=>s.donor))];
     return {cat,item,rs,req,est,sa,pq,u,names,nd:new Set(rs.map(r=>r.date)).size,pct:est?sa/est*100:0}}).sort((a,b)=>catRank(a.cat)-catRank(b.cat));
 }
+function kpiList(e,sa,ext){
+  const res=OTHER||0,recv=res+sa+ext;
+  return [['Total Budgeted',inr(e)],['Residents Donations',OTHER==null?'Unavailable':inr(OTHER)],['Sponsored / Contributions',inr(sa)],['External Contributions',inr(ext)],
+    ['Total Received (Donations + Contributions)',inr(recv)],['Pending',inr(Math.max(0,e-recv))],['Completion',(e?Math.min(100,recv/e*100):0).toFixed(1)+'%']]}
 const tags=x=>x.names.map(n=>`<span class="tag">${esc(n)}</span>`).join('')||'<span class="muted">—</span>';
 function renderSummary(){   // public view: no sponsored / pending figures
   $('#sum tbody').innerHTML=summaryData().map(x=>`<tr class="click ${x.cat==$('#cat').value&&x.item==$('#item').value?'sel':''}" onclick="pick('${esc(x.cat)}','${esc(x.item)}')"><td>${x.cat}</td><td><b>${x.item}</b></td><td>${x.nd>1?x.nd+' dates':x.rs[0].date}</td>
     <td class="n">${x.req} ${x.u}</td><td class="n">${inr(x.est)}</td></tr>`).join('');
-  const G=summaryData();let e=0,sa=0,p=0;G.forEach(x=>{e+=x.est;sa+=x.sa;p+=Math.max(0,x.est-x.sa)});
-  $('#kpis').innerHTML=[['Total Budgeted',inr(e)],['Residents Donations',OTHER==null?'Unavailable':inr(OTHER)],['Sponsored / Contributions',inr(sa)],['External Contributions',inr(EXTP)],['Pending',inr(Math.max(0,e-(sa+(OTHER||0)+EXTP)))],['Completion',(e?Math.min(100,(sa+(OTHER||0)+EXTP)/e*100):0).toFixed(1)+'%']]
+  const G=summaryData(),tot=G.reduce((a,x)=>({e:a.e+x.est,sa:a.sa+x.sa}),{e:0,sa:0});
+  $('#kpis').innerHTML=kpiList(tot.e,subs.reduce((a,s)=>a+(+s.amt||0),0),EXTP)
     .map(([a,b])=>`<div class="kpi"><b>${b}</b><span>${a}</span></div>`).join('');
 }
 async function showSum(){   // admin view: full detail (donor names come from the admin-only list)
   try{AS=await api('/api/admin/subs');EXT=await api('/api/admin/ext')}catch(e){return toast(e.message)}
-  const G=summaryData(AS),extT=EXT.reduce((a,x)=>a+x.amt,0);let e=0,sa=0,p=0;G.forEach(x=>{e+=x.est;sa+=x.sa;p+=Math.max(0,x.est-x.sa)});
-  const k=[['Total Budgeted',inr(e)],['Residents Donations',OTHER==null?'Unavailable':inr(OTHER)],['Sponsored / Contributions',inr(sa)],['External Contributions',inr(extT)],['Pending',inr(Math.max(0,e-(sa+(OTHER||0)+extT)))],['Completion',(e?Math.min(100,(sa+(OTHER||0)+extT)/e*100):0).toFixed(1)+'%'],['Donors',new Set(AS.filter(s=>R[s.rid]&&!R[s.rid].del).map(s=>s.donor.toLowerCase())).size]]
+  const G=summaryData(AS),extT=EXT.reduce((a,x)=>a+x.amt,0),e=G.reduce((a,x)=>a+x.est,0);
+  const k=kpiList(e,AS.reduce((a,s)=>a+(+s.amt||0),0),extT).concat([['Donors',new Set(AS.filter(s=>R[s.rid]&&!R[s.rid].del).map(s=>s.donor.toLowerCase())).size]])
     .map(([a,b])=>`<div class="kpi"><b>${b}</b><span>${a}</span></div>`).join('');
   $('#admBody').innerHTML=`<div class="kpis">${k}</div><br><div class="scroll" style="max-height:58vh"><table><thead><tr><th>Category</th><th>Item</th><th>Dates</th><th class="n">Required</th><th class="n">Est. ₹</th><th class="n">Sponsored ₹</th><th class="n">Pending ₹</th><th class="n">Pending Qty</th><th>Progress</th><th>Donors</th></tr></thead><tbody>`+
   G.map(x=>`<tr><td>${x.cat}</td><td><b>${x.item}</b></td><td>${x.nd>1?x.nd+' dates':x.rs[0].date}</td><td class="n">${x.req} ${x.u}</td><td class="n">${inr(x.est)}</td><td class="n">${inr(x.sa)}</td><td class="n">${inr(Math.max(0,x.est-x.sa))}</td><td class="n">${x.pq} ${x.u}</td>
@@ -131,7 +142,7 @@ async function showSum(){   // admin view: full detail (donor names come from th
 }
 async function init(){
   $('#termsList').innerHTML=termsList();
-  try{await load()}catch(e){$('#kpis').innerHTML='<div class="kpi"><b>⚠ Server not reachable</b><span>Check your internet connection and try again.</span></div>';return}
+  try{await load()}catch(e){$('#kpis').innerHTML='<div class="kpi" style="grid-column:1/-1"><b>⚠ Could not load data</b><span>The server did not respond. Check your internet connection.</span><br><button onclick="location.reload()" style="margin-top:8px">Retry</button></div>';return}
   $('#cat').onchange=()=>{fillItems();sel.clear();renderPick()};$('#item').onchange=()=>{sel.clear();renderPick();renderSummary()};
   refreshDD();renderAll();setInterval(poll,20000);
 }
@@ -214,15 +225,17 @@ function renderPay(){
 }
 function pickShot(inp){
   const f=inp.files&&inp.files[0];if(!f)return;
-  if(!/^image\//.test(f.type))return toast('Please choose an image (screenshot)');
-  if(f.size>15e6)return toast('Image is too large (max 15 MB)');
+  if(f.type&&!/^image\//.test(f.type))return toast('Please choose an image (screenshot)');
+  if(f.size>25e6)return toast('Image is too large (max 25 MB)');
   busyOn('Preparing image…');
+  let done=false;const fin=m=>{if(done)return;done=true;clearTimeout(tm);busyOff();if(m)toast(m);renderPay()};
+  const tm=setTimeout(()=>fin('Could not read this image. Please take a normal screenshot (JPG/PNG) and try again.'),12000);
   const u=URL.createObjectURL(f),im=new Image();
-  im.onload=()=>{try{const k=Math.min(1,1200/Math.max(im.width,im.height)),c=document.createElement('canvas');c.width=Math.round(im.width*k);c.height=Math.round(im.height*k);
+  im.onload=()=>{if(done)return;let m='';try{const k=Math.min(1,1200/Math.max(im.width,im.height)),c=document.createElement('canvas');c.width=Math.max(1,Math.round(im.width*k));c.height=Math.max(1,Math.round(im.height*k));
       const x=c.getContext('2d');x.fillStyle='#fff';x.fillRect(0,0,c.width,c.height);x.drawImage(im,0,0,c.width,c.height);payShot=c.toDataURL('image/jpeg',0.75)}
-    catch(e){toast('Could not process the image')}
-    URL.revokeObjectURL(u);busyOff();renderPay()};
-  im.onerror=()=>{URL.revokeObjectURL(u);busyOff();toast('Could not read this image. Please upload a JPG or PNG screenshot.')};
+    catch(e){m='Could not process the image. Please try another screenshot.'}
+    URL.revokeObjectURL(u);fin(m)};
+  im.onerror=()=>{URL.revokeObjectURL(u);fin('Could not read this image. Please take a normal screenshot (JPG/PNG) and try again.')};
   im.src=u;
 }
 async function viewShot(sid){
@@ -244,8 +257,8 @@ async function confirmSubmit(){
   busy=true;let redir=false;
   try{await api('/api/submit',Object.assign(form(),{mode,shot:mode=='Cash'?payShot:'',lines:lines().map((c,i)=>mode=='Cash'?{rid:c.rid,qty:c.qty,amt:cashAmt[i]}:{rid:c.rid,qty:c.qty})}));
     cart=[];$('#dn').value=$('#dp').value=$('#df').value='';$('#dt').value='';closePay();toast('Contribution submitted. Thank you! 🙏')}
-  catch(x){if(mode=='Physical'&&/choose Cash/i.test(x.message)){mode='Cash';redir=true;toast('Physical quantity limit exceeded. Please contribute by cash instead.')}else toast(x.message)}
-  try{await load()}catch(x){}
+  catch(x){if(mode=='Physical'&&/choose Cash/i.test(x.message)){mode='Cash';redir=true;toast('Physical quantity limit exceeded. Please contribute by cash instead.')}else fail(x,x.timeout?'Submission not confirmed':'Connection problem')}
+  try{await load(true)}catch(x){}
   busy=false;fixCart();refreshDD();renderAll();if(redir)renderPay();
 }
 /* Admin */
@@ -282,7 +295,7 @@ function showItems(){
 }
 async function admin(path,body){
   try{await api(path,body);await load();return true}
-  catch(e){toast(e.message);try{await load()}catch(x){}return false}}
+  catch(e){fail(e,'Saving failed');try{await load(true)}catch(x){}return false}}
 async function fld(id,f,v){
   if(await admin('/api/admin/item',{id,field:f,value:v.trim()}))toast('Saved');else showItems();
   fixCart();refreshDD();renderAll();
@@ -308,7 +321,7 @@ async function showSubs(){
   try{AS=await api('/api/admin/subs')}catch(e){return toast(e.message)}
   const tot=AS.reduce((a,s)=>a+s.amt,0);
   $('#admBody').innerHTML=`<p><b>${AS.length}</b> entries · Total collected commitments <b>${inr(tot)}</b></p><div class="scroll" style="max-height:60vh"><table><thead><tr><th>Submitted</th><th>Donor</th><th>Phone</th><th>Tower</th><th>Flat</th><th>Mode</th><th>Payment Screenshot</th><th>Category</th><th>Item</th><th>Date</th><th>Slot</th><th class="n">Qty</th><th class="n">Amount</th><th></th></tr></thead><tbody>`+
-  (AS.map(s=>{const r=R[s.rid];return `<tr><td>${new Date(s.ts).toLocaleString('en-IN')}</td><td>${esc(s.donor)}</td><td>${esc(s.phone||s.contact||'')}</td><td>${esc(s.tower||'')}</td><td>${esc(s.flat||'')}</td><td>${esc(s.mode||'Physical')}</td><td>${/^https?:/.test(s.ref||'')?`<button class="s" onclick="viewShot('${s.sid}')">View</button>`:esc(s.ref||'')}</td><td>${r.cat}</td><td>${r.item}</td><td>${r.date}</td><td>${r.slot}</td><td class="n">${s.qty} ${r.unit}</td><td class="n">${inr(s.amt)}</td><td><button class="s" onclick="delSub('${s.sid}')">Delete</button></td></tr>`}).join('')||'<tr><td colspan="14" class="muted">No submissions yet</td></tr>')+'</tbody></table></div>';
+  (AS.map(s=>{const r=R[s.rid]||{cat:'—',item:'(not linked to an item)',date:'',slot:'',unit:''};return `<tr><td>${new Date(s.ts).toLocaleString('en-IN')}</td><td>${esc(s.donor)}</td><td>${esc(s.phone||s.contact||'')}</td><td>${esc(s.tower||'')}</td><td>${esc(s.flat||'')}</td><td>${esc(s.mode||'Physical')}</td><td>${/^https?:/.test(s.ref||'')?`<button class="s" onclick="viewShot('${s.sid}')">View</button>`:esc(s.ref||'')}</td><td>${r.cat}</td><td>${r.item}</td><td>${r.date}</td><td>${r.slot}</td><td class="n">${s.qty} ${r.unit}</td><td class="n">${inr(s.amt)}</td><td><button class="s" onclick="delSub('${s.sid}')">Delete</button></td></tr>`}).join('')||'<tr><td colspan="14" class="muted">No submissions yet</td></tr>')+'</tbody></table></div>';
 }
 async function showExt(){
   try{EXT=await api('/api/admin/ext')}catch(e){return toast(e.message)}
@@ -332,7 +345,7 @@ async function updExt(id,f,v){
 async function delExt(id){if(!confirm('Delete this entry?'))return;await admin('/api/admin/ext/delete',{id});showExt()}
 async function delSub(sid){if(!confirm('Delete this entry?'))return;await admin('/api/admin/sub/delete',{sid});fixCart();renderAll();showSubs()}
 function exportCsv(){
-  const rows=[['Submitted','Donor','Phone','Tower','Flat','Mode','Payment Screenshot','Category','Item','Date','Slot','Qty','Unit','Amount']].concat(AS.map(s=>{const r=R[s.rid];return [s.ts,s.donor,s.phone||s.contact||'',s.tower||'',s.flat||'',s.mode||'Physical',s.ref||'',r.cat,r.item,r.date,r.slot,s.qty,r.unit,s.amt]}));
+  const rows=[['Submitted','Donor','Phone','Tower','Flat','Mode','Payment Screenshot','Category','Item','Date','Slot','Qty','Unit','Amount']].concat(AS.map(s=>{const r=R[s.rid]||{cat:'',item:'(not linked)',date:'',slot:'',unit:''};return [s.ts,s.donor,s.phone||s.contact||'',s.tower||'',s.flat||'',s.mode||'Physical',s.ref||'',r.cat,r.item,r.date,r.slot,s.qty,r.unit,s.amt]}));
   const csv=rows.map(r=>r.map(v=>`"${String(v).replace(/"/g,'""')}"`).join(',')).join('\n');
   const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv'}));a.download='sponsorships.csv';a.click();
 }

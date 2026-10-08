@@ -111,9 +111,12 @@ function items_() {
 function subs_() {
   const sh = sheet_('Submissions'), n = sh.getLastRow() - 1;
   if (n < 1) return [];
-  return sh.getRange(2, 1, n, 12).getValues().filter(r => r[0] !== '').map(r => ({
-    sid: String(r[0]), ts: String(r[1]), donor: String(r[2]), phone: String(r[3]), tower: String(r[4]), flat: String(r[5]),
-    rid: (r[11] !== '' && r[11] != null) ? Number(r[11]) : Number(r[6]), qty: Number(r[7]), amt: Number(r[8]), mode: String(r[9] || 'Physical'), ref: String(r[10] || '') }));
+  return sh.getRange(2, 1, n, 12).getValues().map((r, i) => ({ r: r, row: i + 2 })).filter(x => x.r[0] !== '' || x.r[2] !== '' || x.r[8] !== '').map(x => {
+    const r = x.r, a = Number(r[11]), b = Number(r[6]);
+    return { sid: r[0] !== '' ? String(r[0]) : 'row' + x.row, ts: String(r[1]), donor: String(r[2]), phone: String(r[3]), tower: String(r[4]), flat: String(r[5]),
+      rid: (r[11] !== '' && isFinite(a)) ? a : (r[6] !== '' && isFinite(b)) ? b : -1,   // -1 = not linked to an item (still counted in totals)
+      qty: Number(r[7]) || 0, amt: Number(r[8]) || 0, mode: String(r[9] || 'Physical'), ref: String(r[10] || '') };
+  });
 }
 
 function state_() {
@@ -212,6 +215,8 @@ function subDel_(b) {
   const sh = sheet_('Submissions'), n = sh.getLastRow() - 1;
   if (n < 1) return { ok: true };
   const ids = sh.getRange(2, 1, n, 1).getValues();
+  const m = /^row(\d+)$/.exec(String(b.sid));                    // rows typed in by hand without an ID
+  if (m && Number(m[1]) >= 2 && Number(m[1]) <= n + 1 && ids[Number(m[1]) - 2][0] === '') { sh.deleteRow(Number(m[1])); return { ok: true }; }
   for (let i = 0; i < n; i++) if (String(ids[i][0]) === String(b.sid)) { sh.deleteRow(i + 2); break; }
   return { ok: true };
 }
