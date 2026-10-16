@@ -73,7 +73,7 @@ a.btn{display:inline-block;background:var(--p);color:#fff;padding:11px 18px;bord
 <div class="toast" id="toast"></div>
 
 <script>
-let OTHER=null,MP=null,MPB=0,EXTP=0,EXT=[],R=[],subs=[],AS=[],cart=[],sel=new Set(),isAdmin=false,PW='',busy=false;
+let OTHER=null,SPEND=null,MP=null,MPB=0,EXTP=0,EXT=[],R=[],subs=[],AS=[],cart=[],sel=new Set(),isAdmin=false,PW='',busy=false;
 const A=()=>R.filter(r=>!r.del);
 const $=s=>document.querySelector(s), inr=n=>'₹'+Math.round(n).toLocaleString('en-IN');
 const API_URL='https://script.google.com/macros/s/AKfycbwcxsAGt62NlsevOAC8QGHCsIBd20G5DCwFehvAevk8-MMUbaiZSM53DW8iSoFJZ8pm/exec';
@@ -91,7 +91,7 @@ async function api0(path,body){
   clearTimeout(tm);
   const j=await r.json().catch(()=>({error:'Server error'}));
   if(j&&j.error)throw new Error(j.error);return j}
-async function load(quiet){const s=await api('/api/state',null,quiet);R=s.items;subs=s.subs;OTHER=s.other;MP=s.mp;MPB=s.mpBudget||0;EXTP=s.ext||0}
+async function load(quiet){const s=await api('/api/state',null,quiet);R=s.items;subs=s.subs;OTHER=s.other;SPEND=s.spend;MP=s.mp;MPB=s.mpBudget||0;EXTP=s.ext||0}
 function fixCart(){cart=cart.filter(c=>R[c.rid]&&!R[c.rid].del&&c.qty>0)}
 const showErr=(t,m)=>{$('#emt').textContent=t;$('#emm').textContent=m;$('#em').classList.add('on')};
 const closeErr=()=>$('#em').classList.remove('on');
@@ -125,9 +125,9 @@ function summaryData(S=subs){
     return {cat,item,rs,req,est,sa,pq,u,names,nd:new Set(rs.map(r=>r.date)).size,pct:est?sa/est*100:0}}).sort((a,b)=>catRank(a.cat)-catRank(b.cat));
 }
 function kpiList(e0,sa0,ext){
-  const e=e0+MPB,res=OTHER||0,sa=sa0+(MP||0),recv=res+sa+ext;   // Sponsored / Contributions = Submissions sheet + Maha Prasad form
+  const e=e0+MPB,res=OTHER||0,sa=sa0+(MP||0),recv=res+sa+ext,ok=SPEND!=null;   // Sponsored / Contributions = Submissions sheet + Maha Prasad form
   return [['Total Budgeted',inr(e)],['Residents Donations',OTHER==null?'Unavailable':inr(OTHER)],['Sponsored / Contributions',inr(sa)],['External Contributions',inr(ext)],
-    ['Total Received (Donations + Contributions)',inr(recv)],['Pending',inr(Math.max(0,e-recv))],['Completion',(e?Math.min(100,recv/e*100):0).toFixed(1)+'%']]}
+    ['Total Received (Donations + Contributions)',inr(recv)],['Spends',ok?inr(SPEND):'Unavailable'],['Pending in Bank',ok?inr(recv-SPEND):'Unavailable'],['Pending',inr(Math.max(0,e-recv))],['Completion',(e?Math.min(100,recv/e*100):0).toFixed(1)+'%']]}
 const tags=x=>x.names.map(n=>`<span class="tag">${esc(n)}</span>`).join('')||'<span class="muted">—</span>';
 function renderCats(){
   const m=new Map();summaryData().forEach(x=>{const c=m.get(x.cat)||{e:0,r:0};c.e+=x.est;c.r+=x.sa;m.set(x.cat,c)});
@@ -161,9 +161,9 @@ async function init(){
 }
 async function poll(){
   if(busy||document.hidden||$('#am').classList.contains('on')||$('#pm').classList.contains('on'))return;
-  const before=JSON.stringify([R,subs,OTHER,EXTP,MP,MPB]),keep=[...sel];
+  const before=JSON.stringify([R,subs,OTHER,SPEND,EXTP,MP,MPB]),keep=[...sel];
   try{await load(true)}catch(e){return}
-  if(JSON.stringify([R,subs,OTHER,EXTP,MP,MPB])===before)return;
+  if(JSON.stringify([R,subs,OTHER,SPEND,EXTP,MP,MPB])===before)return;
   fixCart();refreshDD();keep.forEach(i=>{const r=R[i];if(r&&!r.del&&!cart.some(c=>c.rid==i))sel.add(i)});renderAll();
 }
 function fillItems(){const items=[...new Set(A().filter(r=>r.cat==$('#cat').value).map(r=>r.item))];$('#item').innerHTML=items.map(i=>`<option>${i}</option>`).join('')}
@@ -340,19 +340,19 @@ async function showExt(){
   try{EXT=await api('/api/admin/ext')}catch(e){return toast(e.message)}
   const tot=EXT.reduce((a,x)=>a+x.amt,0),today=new Date(Date.now()-new Date().getTimezoneOffset()*6e4).toISOString().slice(0,10);
   $('#admBody').innerHTML=`<h3>➕ Add external contribution <small class="muted">(donors from outside the residents; edit any row below)</small></h3>
-  <div class="row"><label>Donor name *<input id="xn" style="width:200px"></label><label>Amount (₹) *<input id="xa" type="number" min="1" step="any" style="width:120px"></label><label>Date *<input id="xd" type="date" value="${today}"></label><button onclick="addExt()">Add</button></div>
+  <div class="row"><label>Donor name *<input id="xn" style="width:200px"></label><label>Amount (₹) *<input id="xa" type="number" min="1" step="any" style="width:120px"></label><label>Date *<input id="xd" type="date" value="${today}"></label><label>Payment mode *<select id="xm"><option value="Cash">Cash</option><option value="Physical">Physical item</option></select></label><button onclick="addExt()">Add</button></div>
   <p><b>${EXT.length}</b> entries · Total external contribution <b>${inr(tot)}</b></p>
-  <div class="scroll" style="max-height:50vh"><table><thead><tr><th>Date</th><th>Donor name</th><th class="n">Amount</th><th></th></tr></thead><tbody>`+
-  (EXT.slice().sort((a,b)=>b.date.localeCompare(a.date)).map(x=>`<tr><td><input type="date" value="${esc(x.date)}" onchange="updExt('${x.id}','date',this.value)"></td><td><input value="${esc(x.name)}" style="width:220px" onchange="updExt('${x.id}','name',this.value)"></td><td class="n"><input type="number" min="1" step="any" value="${x.amt}" style="width:110px" onchange="updExt('${x.id}','amt',this.value)"></td><td><button class="s" onclick="delExt('${x.id}')">Delete</button></td></tr>`).join('')||'<tr><td colspan="4" class="muted">No external contributions yet</td></tr>')+'</tbody></table></div>';
+  <div class="scroll" style="max-height:50vh"><table><thead><tr><th>Date</th><th>Donor name</th><th class="n">Amount</th><th>Mode</th><th></th></tr></thead><tbody>`+
+  (EXT.slice().sort((a,b)=>b.date.localeCompare(a.date)).map(x=>`<tr><td><input type="date" value="${esc(x.date)}" onchange="updExt('${x.id}','date',this.value)"></td><td><input value="${esc(x.name)}" style="width:220px" onchange="updExt('${x.id}','name',this.value)"></td><td class="n"><input type="number" min="1" step="any" value="${x.amt}" style="width:110px" onchange="updExt('${x.id}','amt',this.value)"></td><td><select onchange="updExt('${x.id}','mode',this.value)"><option value="Cash" ${x.mode=='Cash'?'selected':''}>Cash</option><option value="Physical" ${x.mode=='Physical'?'selected':''}>Physical item</option></select></td><td><button class="s" onclick="delExt('${x.id}')">Delete</button></td></tr>`).join('')||'<tr><td colspan="5" class="muted">No external contributions yet</td></tr>')+'</tbody></table></div>';
 }
 async function addExt(){
-  const name=$('#xn').value.trim(),amt=+$('#xa').value,date=$('#xd').value;
+  const name=$('#xn').value.trim(),amt=+$('#xa').value,date=$('#xd').value,mode=$('#xm').value;
   if(!name)return toast('Enter donor name');if(!(amt>0))return toast('Enter a valid amount');if(!date)return toast('Select a date');
-  if(await admin('/api/admin/ext/add',{name,amt,date}))toast('Added');showExt();
+  if(await admin('/api/admin/ext/add',{name,amt,date,mode}))toast('Added');showExt();
 }
 async function updExt(id,f,v){
   const x=EXT.find(e=>e.id==id),n=Object.assign({},x,{[f]:v});
-  if(await admin('/api/admin/ext/update',{id,name:String(n.name).trim(),amt:+n.amt,date:n.date}))toast('Saved');
+  if(await admin('/api/admin/ext/update',{id,name:String(n.name).trim(),amt:+n.amt,date:n.date,mode:n.mode}))toast('Saved');
   showExt();
 }
 async function delExt(id){if(!confirm('Delete this entry?'))return;await admin('/api/admin/ext/delete',{id});showExt()}
