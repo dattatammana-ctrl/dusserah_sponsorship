@@ -41,6 +41,10 @@ a.btn{display:inline-block;background:var(--p);color:#fff;padding:11px 18px;bord
 <main>
 <div class="kpis" id="kpis"></div><br>
 
+<div class="card"><h2>Category-wise Summary</h2>
+<div class="scroll"><table id="catsum"><thead><tr><th>Category</th><th class="n">Total Estimated ₹</th><th class="n">Received (Submissions) ₹</th></tr></thead><tbody></tbody></table></div>
+<small class="muted">Received = contributions submitted through this tracker. Residents donations and external contributions are not tied to a category.</small></div>
+
 <div class="card"><h2>Item Summary <small class="muted">(click a row to sponsor)</small></h2>
 <div class="scroll"><table id="sum"><thead><tr><th>Category</th><th>Item</th><th>Dates</th><th class="n">Required</th><th class="n">Est. ₹</th></tr></thead><tbody></tbody></table></div></div>
 
@@ -69,7 +73,7 @@ a.btn{display:inline-block;background:var(--p);color:#fff;padding:11px 18px;bord
 <div class="toast" id="toast"></div>
 
 <script>
-let OTHER=null,EXTP=0,EXT=[],R=[],subs=[],AS=[],cart=[],sel=new Set(),isAdmin=false,PW='',busy=false;
+let OTHER=null,MP=null,MPB=0,EXTP=0,EXT=[],R=[],subs=[],AS=[],cart=[],sel=new Set(),isAdmin=false,PW='',busy=false;
 const A=()=>R.filter(r=>!r.del);
 const $=s=>document.querySelector(s), inr=n=>'₹'+Math.round(n).toLocaleString('en-IN');
 const API_URL='https://script.google.com/macros/s/AKfycbwcxsAGt62NlsevOAC8QGHCsIBd20G5DCwFehvAevk8-MMUbaiZSM53DW8iSoFJZ8pm/exec';
@@ -87,7 +91,7 @@ async function api0(path,body){
   clearTimeout(tm);
   const j=await r.json().catch(()=>({error:'Server error'}));
   if(j&&j.error)throw new Error(j.error);return j}
-async function load(quiet){const s=await api('/api/state',null,quiet);R=s.items;subs=s.subs;OTHER=s.other;EXTP=s.ext||0}
+async function load(quiet){const s=await api('/api/state',null,quiet);R=s.items;subs=s.subs;OTHER=s.other;MP=s.mp;MPB=s.mpBudget||0;EXTP=s.ext||0}
 function fixCart(){cart=cart.filter(c=>R[c.rid]&&!R[c.rid].del&&c.qty>0)}
 const showErr=(t,m)=>{$('#emt').textContent=t;$('#emm').textContent=m;$('#em').classList.add('on')};
 const closeErr=()=>$('#em').classList.remove('on');
@@ -106,7 +110,7 @@ const TERMS=['One item can be contributed by multiple donors.','Sponsored items 
 const termsList=()=>'<ul style="margin:6px 0 0 18px;padding:0">'+TERMS.map(t=>`<li>${t}</li>`).join('')+'</ul>';
 const key=r=>r.cat+'|'+r.item;
 const CAT_ORDER=['puja','daily prasad','maha prasad','immersion','stage','facilities','others'];
-const catRank=c=>{const i=CAT_ORDER.indexOf(String(c).trim().toLowerCase());return i<0?CAT_ORDER.length-0.5:i};   // unknown categories sit just before/after Others by name
+const catRank=c=>{const k=String(c).trim().toLowerCase(),i=CAT_ORDER.indexOf(k=='pooja'?'puja':k);return i<0?CAT_ORDER.length-0.5:i};   // unknown categories sit just before/after Others by name
 const sortCats=a=>a.slice().sort((x,y)=>catRank(x)-catRank(y));
 const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 
@@ -120,12 +124,20 @@ function summaryData(S=subs){
     const names=[...new Set(S.filter(s=>rs.some(r=>r.id==s.rid)&&s.donor).map(s=>s.donor))];
     return {cat,item,rs,req,est,sa,pq,u,names,nd:new Set(rs.map(r=>r.date)).size,pct:est?sa/est*100:0}}).sort((a,b)=>catRank(a.cat)-catRank(b.cat));
 }
-function kpiList(e,sa,ext){
-  const res=OTHER||0,recv=res+sa+ext;
+function kpiList(e0,sa0,ext){
+  const e=e0+MPB,res=OTHER||0,sa=sa0+(MP||0),recv=res+sa+ext;   // Sponsored / Contributions = Submissions sheet + Maha Prasad form
   return [['Total Budgeted',inr(e)],['Residents Donations',OTHER==null?'Unavailable':inr(OTHER)],['Sponsored / Contributions',inr(sa)],['External Contributions',inr(ext)],
     ['Total Received (Donations + Contributions)',inr(recv)],['Pending',inr(Math.max(0,e-recv))],['Completion',(e?Math.min(100,recv/e*100):0).toFixed(1)+'%']]}
 const tags=x=>x.names.map(n=>`<span class="tag">${esc(n)}</span>`).join('')||'<span class="muted">—</span>';
+function renderCats(){
+  const m=new Map();summaryData().forEach(x=>{const c=m.get(x.cat)||{e:0,r:0};c.e+=x.est;c.r+=x.sa;m.set(x.cat,c)});
+  if(MP>0||MPB>0){const k=[...m.keys()].find(x=>String(x).trim().toLowerCase()=='maha prasad')||'Maha Prasad',c=m.get(k)||{e:0,r:0};c.e+=MPB;c.r+=MP||0;m.set(k,c)}   // form donations are added to the Maha Prasad line
+  let E=0,Rv=0;
+  const rows=[...m].sort((a,b)=>catRank(a[0])-catRank(b[0])).map(([k,v])=>{E+=v.e;Rv+=v.r;return `<tr><td><b>${esc(k)}</b></td><td class="n">${inr(v.e)}</td><td class="n">${inr(v.r)}</td></tr>`}).join('');
+  $('#catsum tbody').innerHTML=rows+`<tr style="font-weight:700;background:#faf0e4"><td>Total</td><td class="n">${inr(E)}</td><td class="n">${inr(Rv)}</td></tr>`;
+}
 function renderSummary(){   // public view: no sponsored / pending figures
+  renderCats();
   $('#sum tbody').innerHTML=summaryData().map(x=>`<tr class="click ${x.cat==$('#cat').value&&x.item==$('#item').value?'sel':''}" onclick="pick('${esc(x.cat)}','${esc(x.item)}')"><td>${x.cat}</td><td><b>${x.item}</b></td><td>${x.nd>1?x.nd+' dates':x.rs[0].date}</td>
     <td class="n">${x.req} ${x.u}</td><td class="n">${inr(x.est)}</td></tr>`).join('');
   const G=summaryData(),tot=G.reduce((a,x)=>({e:a.e+x.est,sa:a.sa+x.sa}),{e:0,sa:0});
@@ -149,9 +161,9 @@ async function init(){
 }
 async function poll(){
   if(busy||document.hidden||$('#am').classList.contains('on')||$('#pm').classList.contains('on'))return;
-  const before=JSON.stringify([R,subs,OTHER,EXTP]),keep=[...sel];
+  const before=JSON.stringify([R,subs,OTHER,EXTP,MP,MPB]),keep=[...sel];
   try{await load(true)}catch(e){return}
-  if(JSON.stringify([R,subs,OTHER,EXTP])===before)return;
+  if(JSON.stringify([R,subs,OTHER,EXTP,MP,MPB])===before)return;
   fixCart();refreshDD();keep.forEach(i=>{const r=R[i];if(r&&!r.del&&!cart.some(c=>c.rid==i))sel.add(i)});renderAll();
 }
 function fillItems(){const items=[...new Set(A().filter(r=>r.cat==$('#cat').value).map(r=>r.item))];$('#item').innerHTML=items.map(i=>`<option>${i}</option>`).join('')}
