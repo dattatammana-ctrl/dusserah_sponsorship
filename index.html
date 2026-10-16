@@ -9,7 +9,7 @@ h1{margin:0;font-size:20px}h2{margin:0 0 10px;font-size:16px}
 main{max-width:1250px;margin:auto;padding:16px}
 .card{background:var(--c);border:1px solid var(--b);border-radius:12px;padding:14px;margin-bottom:16px}
 .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px}
-.kpi{background:var(--c);border:1px solid var(--b);border-radius:12px;padding:10px 14px}.kpi b{display:block;font-size:20px}.kpi span{color:#7a6a5a;font-size:12px}
+.kpi{background:var(--c);border:1px solid var(--b);border-radius:12px;padding:10px 14px}.kpi b{display:block;font-size:20px}@media(max-width:700px){.kpis[style]{grid-template-columns:repeat(2,1fr)!important}}.kpi span{color:#7a6a5a;font-size:12px}
 table{width:100%;border-collapse:collapse}th,td{padding:6px 8px;border-bottom:1px solid var(--b);text-align:left;vertical-align:top}
 th{background:#faf0e4;font-size:12px;text-transform:uppercase;letter-spacing:.3px;position:sticky;top:0}
 td.n,th.n{text-align:right}tbody tr.sel{background:#fff1dc}tbody tr.click{cursor:pointer}tbody tr.click:hover{background:#fff6ea}
@@ -73,7 +73,7 @@ a.btn{display:inline-block;background:var(--p);color:#fff;padding:11px 18px;bord
 <div class="toast" id="toast"></div>
 
 <script>
-let OTHER=null,SPEND=null,MP=null,MPB=0,EXTP=0,EXT=[],R=[],subs=[],AS=[],cart=[],sel=new Set(),isAdmin=false,PW='',busy=false;
+let OTHER=null,SPEND=null,PHYS=null,BANKDR=null,MP=null,MPB=0,EXTP=0,EXT=[],R=[],subs=[],AS=[],cart=[],sel=new Set(),isAdmin=false,PW='',busy=false;
 const A=()=>R.filter(r=>!r.del);
 const $=s=>document.querySelector(s), inr=n=>'₹'+Math.round(n).toLocaleString('en-IN');
 const API_URL='https://script.google.com/macros/s/AKfycbwcxsAGt62NlsevOAC8QGHCsIBd20G5DCwFehvAevk8-MMUbaiZSM53DW8iSoFJZ8pm/exec';
@@ -91,7 +91,7 @@ async function api0(path,body){
   clearTimeout(tm);
   const j=await r.json().catch(()=>({error:'Server error'}));
   if(j&&j.error)throw new Error(j.error);return j}
-async function load(quiet){const s=await api('/api/state',null,quiet);R=s.items;subs=s.subs;OTHER=s.other;SPEND=s.spend;MP=s.mp;MPB=s.mpBudget||0;EXTP=s.ext||0}
+async function load(quiet){const s=await api('/api/state',null,quiet);R=s.items;subs=s.subs;OTHER=s.other;SPEND=s.spend;PHYS=s.phys==null?null:s.phys;BANKDR=s.bank==null?null:s.bank;MP=s.mp;MPB=s.mpBudget||0;EXTP=s.ext||0}
 function fixCart(){cart=cart.filter(c=>R[c.rid]&&!R[c.rid].del&&c.qty>0)}
 const showErr=(t,m)=>{$('#emt').textContent=t;$('#emm').textContent=m;$('#em').classList.add('on')};
 const closeErr=()=>$('#em').classList.remove('on');
@@ -124,10 +124,13 @@ function summaryData(S=subs){
     const names=[...new Set(S.filter(s=>rs.some(r=>r.id==s.rid)&&s.donor).map(s=>s.donor))];
     return {cat,item,rs,req,est,sa,pq,u,names,nd:new Set(rs.map(r=>r.date)).size,pct:est?sa/est*100:0}}).sort((a,b)=>catRank(a.cat)-catRank(b.cat));
 }
-function kpiList(e0,sa0,ext){
-  const e=e0+MPB,res=OTHER||0,sa=sa0+(MP||0),recv=res+sa+ext,ok=SPEND!=null;   // Sponsored / Contributions = Submissions sheet + Maha Prasad form
-  return [['Total Budgeted',inr(e)],['Residents Donations',OTHER==null?'Unavailable':inr(OTHER)],['Sponsored / Contributions',inr(sa)],['External Contributions',inr(ext)],
-    ['Total Received (Donations + Contributions)',inr(recv)],['Spends',ok?inr(SPEND):'Unavailable'],['Pending in Bank',ok?inr(recv-SPEND):'Unavailable'],['Pending',inr(Math.max(0,e-recv))],['Completion',(e?Math.min(100,recv/e*100):0).toFixed(1)+'%']]}
+function kpiList(e0,sa0,ext,extra){   // returns rows of cards: totals / received split / spends split
+  const e=e0+MPB,res=OTHER||0,sa=sa0+(MP||0),recv=res+sa+ext,ok=SPEND!=null,sp=ok&&PHYS!=null&&BANKDR!=null;   // Sponsored / Contributions = Submissions sheet + Maha Prasad form
+  return [
+    [['Total Budgeted',inr(e)],['Total Received (Donations + Contributions)',inr(recv)],['Pending Donations',inr(Math.max(0,e-recv))],['Target %',(e?Math.min(100,recv/e*100):0).toFixed(1)+'%']],
+    [['Residents Donations',OTHER==null?'Unavailable':inr(OTHER)],['Sponsored / Contributions',inr(sa)],['External Contributions',inr(ext)]].concat(extra||[]),
+    [['Spends',ok?inr(SPEND):'Unavailable'],['Physical Items (all categories)',sp?inr(PHYS):'Unavailable'],['Cash Spent in Bank',sp?inr(BANKDR):'Unavailable'],['Fund Available in Bank',ok?inr(recv-SPEND):'Unavailable']]]}
+const kpiHtml=rows=>rows.map(r=>`<div class="kpis" style="grid-template-columns:repeat(${r.length},1fr);margin-bottom:10px">${r.map(([a,b])=>`<div class="kpi"><b>${b}</b><span>${a}</span></div>`).join('')}</div>`).join('');
 const tags=x=>x.names.map(n=>`<span class="tag">${esc(n)}</span>`).join('')||'<span class="muted">—</span>';
 function renderCats(){
   const m=new Map();summaryData().forEach(x=>{const c=m.get(x.cat)||{e:0,r:0};c.e+=x.est;c.r+=x.sa;m.set(x.cat,c)});
@@ -145,15 +148,13 @@ function renderSummary(){   // public view: no sponsored / pending figures
   $('#sum tbody').innerHTML=summaryData().map(x=>`<tr class="click ${x.cat==$('#cat').value&&x.item==$('#item').value?'sel':''}" onclick="pick('${esc(x.cat)}','${esc(x.item)}')"><td>${x.cat}</td><td><b>${x.item}</b></td><td>${x.nd>1?x.nd+' dates':x.rs[0].date}</td>
     <td class="n">${x.req} ${x.u}</td><td class="n">${inr(x.est)}</td></tr>`).join('');
   const G=summaryData(),tot=G.reduce((a,x)=>({e:a.e+x.est,sa:a.sa+x.sa}),{e:0,sa:0});
-  $('#kpis').innerHTML=kpiList(tot.e,subs.reduce((a,s)=>a+(+s.amt||0),0),EXTP)
-    .map(([a,b])=>`<div class="kpi"><b>${b}</b><span>${a}</span></div>`).join('');
+  $('#kpis').innerHTML=kpiHtml(kpiList(tot.e,subs.reduce((a,s)=>a+(+s.amt||0),0),EXTP));
 }
 async function showSum(){   // admin view: full detail (donor names come from the admin-only list)
   try{AS=await api('/api/admin/subs');EXT=await api('/api/admin/ext')}catch(e){return toast(e.message)}
   const G=summaryData(AS),extT=EXT.reduce((a,x)=>a+x.amt,0),e=G.reduce((a,x)=>a+x.est,0);
-  const k=kpiList(e,AS.reduce((a,s)=>a+(+s.amt||0),0),extT).concat([['Donors',new Set(AS.filter(s=>R[s.rid]&&!R[s.rid].del).map(s=>s.donor.toLowerCase())).size]])
-    .map(([a,b])=>`<div class="kpi"><b>${b}</b><span>${a}</span></div>`).join('');
-  $('#admBody').innerHTML=`<div class="kpis">${k}</div><br><div class="scroll" style="max-height:58vh"><table><thead><tr><th>Category</th><th>Item</th><th>Dates</th><th class="n">Required</th><th class="n">Est. ₹</th><th class="n">Sponsored ₹</th><th class="n">Pending ₹</th><th class="n">Pending Qty</th><th>Progress</th><th>Donors</th></tr></thead><tbody>`+
+  const k=kpiHtml(kpiList(e,AS.reduce((a,s)=>a+(+s.amt||0),0),extT,[['Donors',new Set(AS.filter(s=>R[s.rid]&&!R[s.rid].del).map(s=>s.donor.toLowerCase())).size]]));
+  $('#admBody').innerHTML=`${k}<br><div class="scroll" style="max-height:58vh"><table><thead><tr><th>Category</th><th>Item</th><th>Dates</th><th class="n">Required</th><th class="n">Est. ₹</th><th class="n">Sponsored ₹</th><th class="n">Pending ₹</th><th class="n">Pending Qty</th><th>Progress</th><th>Donors</th></tr></thead><tbody>`+
   G.map(x=>`<tr><td>${x.cat}</td><td><b>${x.item}</b></td><td>${x.nd>1?x.nd+' dates':x.rs[0].date}</td><td class="n">${x.req} ${x.u}</td><td class="n">${inr(x.est)}</td><td class="n">${inr(x.sa)}</td><td class="n">${inr(Math.max(0,x.est-x.sa))}</td><td class="n">${x.pq} ${x.u}</td>
   <td><div class="bar"><i style="width:${Math.min(100,x.pct)}%"></i></div>${x.pct.toFixed(0)}%</td><td>${tags(x)}</td></tr>`).join('')+'</tbody></table></div>';
 }
@@ -165,9 +166,9 @@ async function init(){
 }
 async function poll(){
   if(busy||document.hidden||$('#am').classList.contains('on')||$('#pm').classList.contains('on'))return;
-  const before=JSON.stringify([R,subs,OTHER,SPEND,EXTP,MP,MPB]),keep=[...sel];
+  const before=JSON.stringify([R,subs,OTHER,SPEND,PHYS,BANKDR,EXTP,MP,MPB]),keep=[...sel];
   try{await load(true)}catch(e){return}
-  if(JSON.stringify([R,subs,OTHER,SPEND,EXTP,MP,MPB])===before)return;
+  if(JSON.stringify([R,subs,OTHER,SPEND,PHYS,BANKDR,EXTP,MP,MPB])===before)return;
   fixCart();refreshDD();keep.forEach(i=>{const r=R[i];if(r&&!r.del&&!cart.some(c=>c.rid==i))sel.add(i)});renderAll();
 }
 function fillItems(){const items=[...new Set(A().filter(r=>r.cat==$('#cat').value).map(r=>r.item))];$('#item').innerHTML=items.map(i=>`<option>${i}</option>`).join('')}
@@ -286,8 +287,8 @@ let tab='sum';
 async function showAdmin(){
   try{await load()}catch(e){}
   $('#login').style.display='none';$('#panel').style.display='';
-  $('#adm').innerHTML=`<div class="row" style="margin-bottom:10px"><button class="${tab=='sum'?'':'s'}" onclick="tab='sum';showAdmin()">Item Summary</button><button class="${tab=='subs'?'':'s'}" onclick="tab='subs';showAdmin()">Submissions</button><button class="${tab=='ext'?'':'s'}" onclick="tab='ext';showAdmin()">External Contribution</button><button class="${tab=='items'?'':'s'}" onclick="tab='items';showAdmin()">Manage Items</button></div><div id="admBody"></div>`;
-  tab=='sum'?showSum():tab=='subs'?showSubs():tab=='ext'?showExt():showItems();
+  $('#adm').innerHTML=`<div class="row" style="margin-bottom:10px"><button class="${tab=='sum'?'':'s'}" onclick="tab='sum';showAdmin()">Item Summary</button><button class="${tab=='subs'?'':'s'}" onclick="tab='subs';showAdmin()">Submissions</button><button class="${tab=='mix'?'':'s'}" onclick="tab='mix';showAdmin()">Cash / Physical</button><button class="${tab=='ext'?'':'s'}" onclick="tab='ext';showAdmin()">External Contribution</button><button class="${tab=='items'?'':'s'}" onclick="tab='items';showAdmin()">Manage Items</button></div><div id="admBody"></div>`;
+  tab=='sum'?showSum():tab=='subs'?showSubs():tab=='mix'?showMix():tab=='ext'?showExt():showItems();
 }
 function refreshDD(){
   const c=$('#cat').value,i=$('#item').value,cats=sortCats([...new Set(A().map(r=>r.cat))]);
@@ -339,6 +340,29 @@ async function showSubs(){
   const tot=AS.reduce((a,s)=>a+s.amt,0);
   $('#admBody').innerHTML=`<p><b>${AS.length}</b> entries · Total collected commitments <b>${inr(tot)}</b></p><div class="scroll" style="max-height:60vh"><table><thead><tr><th>Submitted</th><th>Donor</th><th>Phone</th><th>Tower</th><th>Flat</th><th>Mode</th><th>Payment Screenshot</th><th>Category</th><th>Item</th><th>Date</th><th>Slot</th><th class="n">Qty</th><th class="n">Amount</th><th></th></tr></thead><tbody>`+
   (AS.map(s=>{const r=R[s.rid]||{cat:'—',item:'(not linked to an item)',date:'',slot:'',unit:''};return `<tr><td>${new Date(s.ts).toLocaleString('en-IN')}</td><td>${esc(s.donor)}</td><td>${esc(s.phone||s.contact||'')}</td><td>${esc(s.tower||'')}</td><td>${esc(s.flat||'')}</td><td>${esc(s.mode||'Physical')}</td><td>${/^https?:/.test(s.ref||'')?`<button class="s" onclick="viewShot('${s.sid}')">View</button>`:esc(s.ref||'')}</td><td>${r.cat}</td><td>${r.item}</td><td>${r.date}</td><td>${r.slot}</td><td class="n">${s.qty} ${r.unit}</td><td class="n">${inr(s.amt)}</td><td><button class="s" onclick="delSub('${s.sid}')">Delete</button></td></tr>`}).join('')||'<tr><td colspan="14" class="muted">No submissions yet</td></tr>')+'</tbody></table></div>';
+}
+async function showMix(){
+  let M,B=null;try{const r=await api('/api/admin/mix');M=Array.isArray(r)?r:r.rows;B=Array.isArray(r)?null:r.book}catch(e){return fail(e,'Could not load')}
+  const sum=(rows)=>rows.reduce((a,x)=>({c:a.c+x.cash,p:a.p+x.phys}),{c:0,p:0});
+  const T=sum(M),srcs=[...new Set(M.map(x=>x.src))],nm={'Submissions':'Item submissions','Maha Prasad Form':'Maha Prasad donations form','External':'External contributions'};
+  const card=(a,b)=>`<div class="kpi"><b>${b}</b><span>${a}</span></div>`;
+  const row=(a,b,c,d,bold)=>`<tr${bold?' style="font-weight:700;background:#faf0e4"':''}><td>${a}</td><td>${b}</td><td class="n">${inr(c)}</td><td class="n">${inr(d)}</td><td class="n">${inr(c+d)}</td></tr>`;
+  const ln=(a,v,o={})=>`<tr${o.b?' style="font-weight:700;background:#faf0e4"':''}><td style="padding-left:${o.i?26:8}px">${a}</td><td class="n">${v==null?'Unavailable':inr(v)}</td></tr>`;
+  const bank=B?`<h3>🏦 Bank statement – money in (credits)</h3><table><tbody>${ln('Total credited (CR)',B.credit.total,{b:1})}
+    ${ln('Resident donation form (Other sources)',B.credit.resident,{i:1})}${ln('Submissions – Cash mode',B.credit.subs,{i:1})}
+    ${ln('Maha Prasad – Cash payment mode',B.credit.mp,{i:1})}${ln('External sponsorship – Cash',B.credit.ext,{i:1})}
+    ${ln('Hundi / Direct payments (balance of the above)',B.credit.hundi,{i:1,b:1})}</tbody></table>
+    ${B.credit.hundi!=null&&B.credit.hundi<0?'<p style="color:#b3261e">⚠ The split adds up to more than the bank credits. Some entries may be double counted or not credited yet.</p>':''}
+    <h3>📦 Physical items (not through the bank)</h3><table><tbody>${ln('Submissions',B.physical.subs,{i:1})}${ln('Maha Prasad',B.physical.mp,{i:1})}${ln('External contributions',B.physical.ext,{i:1})}${ln('Total physical items',B.physical.total,{b:1})}</tbody></table>
+    <h3>💸 Spends</h3><table><tbody>${ln('Bank statement – total debited (DR)',B.spend.bank,{b:1})}
+    ${ln('Physical items – Submissions',B.physical.subs,{i:1})}${ln('Physical items – Maha Prasad',B.physical.mp,{i:1})}${ln('Physical items – External contributions',B.physical.ext,{i:1})}
+    ${ln('Total spends',B.spend.total,{b:1})}${ln('Fund available in bank (credited − debited)',B.pendingBank,{b:1})}</tbody></table><br>`:'';
+  $('#admBody').innerHTML=bank+`<div class="kpis">${card('Cash contributions',inr(T.c))}${card('Physical item contributions',inr(T.p))}${card('Total (cash + physical)',inr(T.c+T.p))}</div><br>
+  <h3>By source</h3><table><thead><tr><th>Source</th><th></th><th class="n">Cash ₹</th><th class="n">Physical ₹</th><th class="n">Total ₹</th></tr></thead><tbody>`+
+  srcs.map(s=>{const t=sum(M.filter(x=>x.src==s));return row(esc(nm[s]||s),'',t.c,t.p)}).join('')+row('Total','',T.c,T.p,true)+`</tbody></table><br>
+  <h3>By source &amp; category</h3><div class="scroll" style="max-height:48vh"><table><thead><tr><th>Source</th><th>Category</th><th class="n">Cash ₹</th><th class="n">Physical ₹</th><th class="n">Total ₹</th></tr></thead><tbody>`+
+  (M.map(x=>row(esc(nm[x.src]||x.src),esc(x.cat),x.cash,x.phys)).join('')||'<tr><td colspan="5" class="muted">No contributions yet</td></tr>')+row('Total','',T.c,T.p,true)+`</tbody></table></div>
+  <p class="muted">Cash / physical comes from each entry's payment mode. Residents Donations (from the bank statement) are not included here.</p>`;
 }
 async function showExt(){
   try{EXT=await api('/api/admin/ext')}catch(e){return toast(e.message)}
