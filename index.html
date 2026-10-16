@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>OnCloud33 Dusserah 2026 – Item-wise Sponsorship Tracker</title>
+<title>OnCloud33 – Dusserah Navarathri &amp; Bathukamma Celebrations</title>
 <style>
 :root{--p:#b3261e;--o:#e8710a;--bg:#fff8f0;--c:#fff;--b:#eadfd2;--g:#1e8e3e;--t:#2b2118}
 *{box-sizing:border-box}body{margin:0;font:14px/1.4 -apple-system,Segoe UI,Roboto,sans-serif;background:var(--bg);color:var(--t)}
@@ -37,13 +37,13 @@ a.btn{display:inline-block;background:var(--p);color:#fff;padding:11px 18px;bord
 #em{z-index:60}
 </style></head><body>
 <div id="ld"><i></i><span id="ldt">Loading…</span></div>
-<header><div><h1>🪔 OnCloud33 Dusserah 2026</h1><div style="opacity:.9;font-size:13px">Item-wise Sponsorship Tracker</div></div><button class="s" onclick="adminOpen()">🔒 Admin View</button></header>
+<header><div><h1>🪔 OnCloud33 – Dusserah Navarathri &amp; Bathukamma Celebrations🪔</h1><div style="opacity:.9;font-size:13px">Item-wise Sponsorship Tracker</div></div><button class="s" onclick="adminOpen()">🔒 Admin View</button></header>
 <main>
 <div class="kpis" id="kpis"></div><br>
 
 <div class="card"><h2>Category-wise Summary</h2>
 <div class="scroll"><table id="catsum"><thead><tr><th>Category</th><th class="n">Total Estimated ₹</th><th class="n">Received (Submissions) ₹</th></tr></thead><tbody></tbody></table></div>
-<small class="muted">Received = contributions submitted through this tracker. Residents donations and external contributions are not tied to a category.</small></div>
+<small class="muted">Received = contributions submitted through this tracker. </small></div>
 
 <div class="card"><h2>Item Summary <small class="muted">(click a row to sponsor)</small></h2>
 <div class="scroll"><table id="sum"><thead><tr><th>Category</th><th>Item</th><th>Dates</th><th class="n">Required</th><th class="n">Est. ₹</th></tr></thead><tbody></tbody></table></div></div>
@@ -134,7 +134,11 @@ function renderCats(){
   if(MP>0||MPB>0){const k=[...m.keys()].find(x=>String(x).trim().toLowerCase()=='maha prasad')||'Maha Prasad',c=m.get(k)||{e:0,r:0};c.e+=MPB;c.r+=MP||0;m.set(k,c)}   // form donations are added to the Maha Prasad line
   let E=0,Rv=0;
   const rows=[...m].sort((a,b)=>catRank(a[0])-catRank(b[0])).map(([k,v])=>{E+=v.e;Rv+=v.r;return `<tr><td><b>${esc(k)}</b></td><td class="n">${inr(v.e)}</td><td class="n">${inr(v.r)}</td></tr>`}).join('');
-  $('#catsum tbody').innerHTML=rows+`<tr style="font-weight:700;background:#faf0e4"><td>Total</td><td class="n">${inr(E)}</td><td class="n">${inr(Rv)}</td></tr>`;
+  const rd=OTHER==null?null:OTHER; if(rd!=null)Rv+=rd;      // Residents Donations: estimate 0, actual = the Residents Donations KPI
+  const resRow=`<tr><td><b>Residents Donations</b></td><td class="n">${inr(0)}</td><td class="n">${rd==null?'Unavailable':inr(rd)}</td></tr>`;
+  Rv+=EXTP||0;                                              // External Contributions: estimate 0, actual = the External Contributions KPI
+  const extRow=`<tr><td><b>External Contributions</b></td><td class="n">${inr(0)}</td><td class="n">${inr(EXTP||0)}</td></tr>`;
+  $('#catsum tbody').innerHTML=rows+resRow+extRow+`<tr style="font-weight:700;background:#faf0e4"><td>Total</td><td class="n">${inr(E)}</td><td class="n">${inr(Rv)}</td></tr>`;
 }
 function renderSummary(){   // public view: no sponsored / pending figures
   renderCats();
