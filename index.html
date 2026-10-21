@@ -39,7 +39,9 @@ a.btn{display:inline-block;background:var(--p);color:#fff;padding:11px 18px;bord
 <div id="ld"><i></i><span id="ldt">Loading…</span></div>
 <header><div><h1>🪔 OnCloud33 – Dusserah Navarathri &amp; Bathukamma Celebrations🪔</h1><div style="opacity:.9;font-size:13px">Item-wise Sponsorship Tracker</div></div><button class="s" onclick="adminOpen()">🔒 Admin View</button></header>
 <main>
-<div id="kpis"></div><br>
+<div id="kpis"></div>
+
+<div class="card" id="auctionCard"><h2>🏆 Auction Winners</h2><div id="auctionBody"></div></div>
 
 <div class="card"><h2>Category-wise Summary</h2>
 <div class="scroll"><table id="catsum"><thead><tr><th>Category</th><th class="n">Total Estimated ₹</th><th class="n">Received (Submissions) ₹</th></tr></thead><tbody></tbody></table></div>
@@ -73,7 +75,7 @@ a.btn{display:inline-block;background:var(--p);color:#fff;padding:11px 18px;bord
 <div class="toast" id="toast"></div>
 
 <script>
-let OTHER=null,SPEND=null,PHYS=null,BANKDR=null,SC=null,SP=null,EC=null,EP=null,MP=null,MPB=0,EXTP=0,EXT=[],R=[],subs=[],AS=[],cart=[],sel=new Set(),isAdmin=false,PW='',busy=false;
+let OTHER=null,SPEND=null,PHYS=null,BANKDR=null,SC=null,SP=null,EC=null,EP=null,AUC=null,NET=null,MP=null,MPB=0,EXTP=0,EXT=[],R=[],subs=[],AS=[],cart=[],sel=new Set(),isAdmin=false,PW='',busy=false;
 const A=()=>R.filter(r=>!r.del);
 const $=s=>document.querySelector(s), inr=n=>'₹'+Math.round(n).toLocaleString('en-IN');
 const API_URL='https://script.google.com/macros/s/AKfycbwcxsAGt62NlsevOAC8QGHCsIBd20G5DCwFehvAevk8-MMUbaiZSM53DW8iSoFJZ8pm/exec';
@@ -91,7 +93,7 @@ async function api0(path,body){
   clearTimeout(tm);
   const j=await r.json().catch(()=>({error:'Server error'}));
   if(j&&j.error)throw new Error(j.error);return j}
-async function load(quiet){const s=await api('/api/state',null,quiet);R=s.items;subs=s.subs;OTHER=s.other;SPEND=s.spend;PHYS=s.phys==null?null:s.phys;BANKDR=s.bank==null?null:s.bank;SC=s.sc==null?null:s.sc;SP=s.sp==null?null:s.sp;EC=s.ec==null?null:s.ec;EP=s.ep==null?null:s.ep;MP=s.mp;MPB=s.mpBudget||0;EXTP=s.ext||0}
+async function load(quiet){const s=await api('/api/state',null,quiet);R=s.items;subs=s.subs;OTHER=s.other;SPEND=s.spend;PHYS=s.phys==null?null:s.phys;BANKDR=s.bank==null?null:s.bank;SC=s.sc==null?null:s.sc;SP=s.sp==null?null:s.sp;EC=s.ec==null?null:s.ec;EP=s.ep==null?null:s.ep;AUC=s.auction||null;NET=s.net==null?null:s.net;MP=s.mp;MPB=s.mpBudget||0;EXTP=s.ext||0}
 function fixCart(){cart=cart.filter(c=>R[c.rid]&&!R[c.rid].del&&c.qty>0)}
 const showErr=(t,m)=>{$('#emt').textContent=t;$('#emm').textContent=m;$('#em').classList.add('on')};
 const closeErr=()=>$('#em').classList.remove('on');
@@ -125,11 +127,12 @@ function summaryData(S=subs){
     return {cat,item,rs,req,est,sa,pq,u,names,nd:new Set(rs.map(r=>r.date)).size,pct:est?sa/est*100:0}}).sort((a,b)=>catRank(a.cat)-catRank(b.cat));
 }
 function kpiList(e0,sa0,ext,extra){   // returns rows of cards: totals / received split / spends split
-  const e=e0+MPB,res=OTHER||0,sa=sa0+(MP||0),recv=res+sa+ext,ok=SPEND!=null,sp=ok&&PHYS!=null&&BANKDR!=null;   // Sponsored / Contributions = Submissions sheet + Maha Prasad form
+  const e=e0+MPB,res=OTHER||0,sa=sa0+(MP||0),auc=AUC?AUC.total:0,recv=res+sa+ext+auc,ok=SPEND!=null,sp=ok&&PHYS!=null&&BANKDR!=null;   // Sponsored / Contributions = Submissions sheet + Maha Prasad form
   return [
     ['Budget Overview',[['Total Budgeted',inr(e)],['Total Received (Donations + Contributions)',inr(recv)],['Pending Donations',inr(Math.max(0,e-recv))],['Target %',(e?Math.min(100,recv/e*100):0).toFixed(1)+'%']]],
-    ['Funds collected Summary:',[['Residents Donations',OTHER==null?'Unavailable':inr(OTHER)],['Sponsored / Contributions',inr(sa)],['Cash',SC==null?'Unavailable':inr(SC),1],['Physical',SP==null?'Unavailable':inr(SP),1],['External Contributions',inr(ext)],['Cash',EC==null?'Unavailable':inr(EC),1],['Physical',EP==null?'Unavailable':inr(EP),1]].concat(extra||[])],
-    ['Spend Analyser',[['Spends',ok?inr(SPEND):'Unavailable'],['Physical Items (all categories)',sp?inr(PHYS):'Unavailable'],['Cash Spent in Bank',sp?inr(BANKDR):'Unavailable'],['Fund Available in Bank',ok?inr(recv-SPEND):'Unavailable']]]]}
+    ['Funds collected Summary:',[['Residents Donations',OTHER==null?'Unavailable':inr(OTHER)],['Sponsored / Contributions',inr(sa)],['Cash',SC==null?'Unavailable':inr(SC),1],['Physical',SP==null?'Unavailable':inr(SP),1],['External Contributions',inr(ext)],['Cash',EC==null?'Unavailable':inr(EC),1],['Physical',EP==null?'Unavailable':inr(EP),1],['Auction',AUC?inr(AUC.total):'Unavailable']].concat(extra||[])],
+    ['Spend Analyser',[['Spends',ok?inr(SPEND):'Unavailable'],['Physical Items (all categories)',sp?inr(PHYS):'Unavailable'],['Cash Spent in Bank',sp?inr(BANKDR):'Unavailable'],['Fund Available in Bank',NET!=null?inr(NET):(ok?inr(recv-SPEND):'Unavailable')]]],
+    ['Auction',[['Auction Collections',AUC?inr(AUC.total):'Unavailable'],['Items Auctioned',AUC?String(AUC.count):'Unavailable']]]]}
 const kpiHtml=secs=>secs.map(([t,r])=>`<div class="ksec"><div class="kt">${t}</div><div class="kpis" style="--n:${r.length};--cols:${r.map(c=>'minmax(0,'+(c[2]?0.62:1)+'fr)').join(' ')}">${r.map(([a,b,sm])=>`<div class="kpi${sm?' sm':''}"><b>${b}</b><span>${a}</span></div>`).join('')}</div></div>`).join('');
 const tags=x=>x.names.map(n=>`<span class="tag">${esc(n)}</span>`).join('')||'<span class="muted">—</span>';
 function renderCats(){
@@ -139,12 +142,19 @@ function renderCats(){
   const rows=[...m].sort((a,b)=>catRank(a[0])-catRank(b[0])).map(([k,v])=>{E+=v.e;Rv+=v.r;return `<tr><td><b>${esc(k)}</b></td><td class="n">${inr(v.e)}</td><td class="n">${inr(v.r)}</td></tr>`}).join('');
   const rd=OTHER==null?null:OTHER; if(rd!=null)Rv+=rd;      // Residents Donations: estimate 0, actual = the Residents Donations KPI
   const resRow=`<tr><td><b>Residents Donations</b></td><td class="n">${inr(0)}</td><td class="n">${rd==null?'Unavailable':inr(rd)}</td></tr>`;
-  Rv+=EXTP||0;                                              // External Contributions: estimate 0, actual = the External Contributions KPI
+  Rv+=(EXTP||0)+(AUC?AUC.total:0);                                              // External Contributions: estimate 0, actual = the External Contributions KPI
   const extRow=`<tr><td><b>External Contributions</b></td><td class="n">${inr(0)}</td><td class="n">${inr(EXTP||0)}</td></tr>`;
-  $('#catsum tbody').innerHTML=rows+resRow+extRow+`<tr style="font-weight:700;background:#faf0e4"><td>Total</td><td class="n">${inr(E)}</td><td class="n">${inr(Rv)}</td></tr>`;
+  const aucRow=`<tr><td><b>Auction</b></td><td class="n">${inr(0)}</td><td class="n">${AUC?inr(AUC.total):'Unavailable'}</td></tr>`;
+  $('#catsum tbody').innerHTML=rows+resRow+extRow+aucRow+`<tr style="font-weight:700;background:#faf0e4"><td>Total</td><td class="n">${inr(E)}</td><td class="n">${inr(Rv)}</td></tr>`;
+}
+function renderAuction(){
+  const W=(AUC&&AUC.winners)||[];
+  $('#auctionBody').innerHTML=W.length?`<div class="scroll" style="max-height:340px"><table><thead><tr><th>Item #</th><th>Day</th><th>Ammavaru Alankarana</th><th>Winner</th><th>Flat</th></tr></thead><tbody>`+
+    W.map(x=>`<tr><td>${esc(x.no)}</td><td>${esc(x.day)}</td><td>${esc(x.alank)}</td><td><b>${esc(x.name)}</b></td><td style="white-space:nowrap">T${esc(x.tower)} - ${esc(x.flat)}</td></tr>`).join('')+`</tbody></table></div>`
+    :`<p class="muted">${AUC===null?'Winners will be shown here once the auction details are available.':'No winners yet.'}</p>`;
 }
 function renderSummary(){   // public view: no sponsored / pending figures
-  renderCats();
+  renderCats();renderAuction();
   $('#sum tbody').innerHTML=summaryData().map(x=>`<tr class="click ${x.cat==$('#cat').value&&x.item==$('#item').value?'sel':''}" onclick="pick('${esc(x.cat)}','${esc(x.item)}')"><td>${x.cat}</td><td><b>${x.item}</b></td><td>${x.nd>1?x.nd+' dates':x.rs[0].date}</td>
     <td class="n">${x.req} ${x.u}</td><td class="n">${inr(x.est)}</td></tr>`).join('');
   const G=summaryData(),tot=G.reduce((a,x)=>({e:a.e+x.est,sa:a.sa+x.sa}),{e:0,sa:0});
@@ -166,9 +176,9 @@ async function init(){
 }
 async function poll(){
   if(busy||document.hidden||$('#am').classList.contains('on')||$('#pm').classList.contains('on'))return;
-  const before=JSON.stringify([R,subs,OTHER,SPEND,PHYS,BANKDR,SC,SP,EC,EP,EXTP,MP,MPB]),keep=[...sel];
+  const before=JSON.stringify([R,subs,OTHER,SPEND,PHYS,BANKDR,SC,SP,EC,EP,AUC,NET,EXTP,MP,MPB]),keep=[...sel];
   try{await load(true)}catch(e){return}
-  if(JSON.stringify([R,subs,OTHER,SPEND,PHYS,BANKDR,SC,SP,EC,EP,EXTP,MP,MPB])===before)return;
+  if(JSON.stringify([R,subs,OTHER,SPEND,PHYS,BANKDR,SC,SP,EC,EP,AUC,NET,EXTP,MP,MPB])===before)return;
   fixCart();refreshDD();keep.forEach(i=>{const r=R[i];if(r&&!r.del&&!cart.some(c=>c.rid==i))sel.add(i)});renderAll();
 }
 function fillItems(){const items=[...new Set(A().filter(r=>r.cat==$('#cat').value).map(r=>r.item))];$('#item').innerHTML=items.map(i=>`<option>${i}</option>`).join('')}
