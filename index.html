@@ -158,7 +158,7 @@ function renderAuction(){
 function renderDonors(){
   const D=DON||[];
   $('#donorBody').innerHTML=D.length?`<div class="scroll" style="max-height:${40+10*37}px"><table><thead><tr><th>#</th><th>Donor</th><th>Flat</th><th class="n">Total contribution</th><th>Contributed towards</th></tr></thead><tbody>`+
-    D.map((x,i)=>{const cats=x.cats.map(c=>`${esc(c.c)} ${inr(c.a)}`).join(' · ');return `<tr style="height:37px"><td>${i+1<=3?['🥇','🥈','🥉'][i]:i+1}</td><td style="white-space:nowrap"><b>${esc(x.name)}</b></td><td style="white-space:nowrap">${esc(x.flat)}</td><td class="n"><b>${inr(x.total)}</b></td><td style="white-space:nowrap" title="${cats}">${cats}</td></tr>`}).join('')+`</tbody></table></div><small class="muted">${D.length} donors. Scroll to see everyone. Each donor's amounts across all categories are added together.</small>`
+    D.map((x,i)=>{const cats=x.cats.map(c=>`${esc(c.c)} ${inr(c.a)}`).join(' · ');return `<tr style="height:37px"><td>${i+1<=3?['🥇','🥈','🥉'][i]:i+1}</td><td style="white-space:nowrap"><b>${esc(x.name)}</b></td><td style="white-space:nowrap">${esc(x.flat)}</td><td class="n"><b>${inr(x.total)}</b></td><td style="white-space:nowrap" title="${cats}">${cats}</td></tr>`}).join('')+`</tbody></table></div><small class="muted">${D.length} donors. Scroll to see everyone. Each donor's amounts across all categories are added together (auction is shown separately above).</small>`
     :`<p class="muted">Donor details will appear here.</p>`;
 }
 function renderSummary(){   // public view: no sponsored / pending figures
