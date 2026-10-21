@@ -129,7 +129,7 @@ function summaryData(S=subs){
 function kpiList(e0,sa0,ext,extra){   // returns rows of cards: totals / received split / spends split
   const e=e0+MPB,res=OTHER||0,sa=sa0+(MP||0),auc=AUC?AUC.total:0,recv=res+sa+ext+auc,ok=SPEND!=null,sp=ok&&PHYS!=null&&BANKDR!=null;   // Sponsored / Contributions = Submissions sheet + Maha Prasad form
   return [
-    ['Budget Overview',[['Total Budgeted',inr(e)],['Total Received (Donations + Contributions)',inr(recv)],['Pending Donations',inr(Math.max(0,e-recv))],['Target %',(e?Math.min(100,recv/e*100):0).toFixed(1)+'%']]],
+    ['Budget Overview',[['Total Budgeted',inr(e)],['Total Received (Donations + Contributions)',inr(recv)],['Pending Donations',inr(Math.max(0,e-recv))],['Target %',(e?recv/e*100:0).toFixed(1)+'%']]],
     ['Funds collected Summary:',[['Residents Donations',OTHER==null?'Unavailable':inr(OTHER)],['Sponsored / Contributions',inr(sa)],['Cash',SC==null?'Unavailable':inr(SC),1],['Physical',SP==null?'Unavailable':inr(SP),1],['External Contributions',inr(ext)],['Cash',EC==null?'Unavailable':inr(EC),1],['Physical',EP==null?'Unavailable':inr(EP),1],['Auction',AUC?inr(AUC.total):'Unavailable']].concat(extra||[])],
     ['Spend Analyser',[['Spends',ok?inr(SPEND):'Unavailable'],['Physical Items (all categories)',sp?inr(PHYS):'Unavailable'],['Cash Spent in Bank',sp?inr(BANKDR):'Unavailable'],['Fund Available in Bank',NET!=null?inr(NET):(ok?inr(recv-SPEND):'Unavailable')]]],
     ['Auction',[['Auction Collections',AUC?inr(AUC.total):'Unavailable'],['Items Auctioned',AUC?String(AUC.count):'Unavailable']]]]}
