@@ -11,14 +11,17 @@ const SHEET_ID = '1EGMumiBxnLya47f4eEn-RaWbxNpsW-Fs4RZHKKFRQoQ';   // your Googl
 
 const SHEETS = {
   Items:       { hdr: ['Category', 'Item', 'Date', 'Slot', 'Unit', 'Requirement', 'Est. amount', 'Deleted'], text: [1, 2, 3, 4, 5] },
-  External:    { hdr: ['ID', 'Name', 'Amount', 'Date', 'Added'], text: [1, 2, 4, 5] },
+  External:    { hdr: ['ID', 'Name', 'Amount', 'Date', 'Added', 'Mode'], text: [1, 2, 4, 5, 6] },
+  Archive:     { hdr: ['SID', 'Timestamp', 'Donor', 'Phone', 'Tower', 'Flat', 'Item Details', 'Qty', 'Amount', 'Mode', 'Payment Screenshot', 'Item Ref'], text: [1, 2, 3, 4, 5, 6, 7, 11] },
   Submissions: { hdr: ['SID', 'Timestamp', 'Donor', 'Phone', 'Tower', 'Flat', 'Item Details', 'Qty', 'Amount', 'Mode', 'Payment Screenshot', 'Item Ref (do not edit)'],  text: [1, 2, 3, 4, 5, 6, 11] }
 };
-/* "Actual cash donations through other source": sum of column L of this sheet (no sign-in needed by donors; the script reads it as you) */
-const OTHER_SHEET_ID = '1N28jKtSsuePNc5PMhAwyuCFXutCJhtWwxljgqoaeLrA';
-const OTHER_TAB = '';        // tab name; '' = first tab
-const OTHER_COL = 12;        // column L
-const OTHER_HEADER_ROWS = 1; // rows to skip at the top
+const STATEMENT_TAB = 'Statement';   // bank statement: Type CR = money in, DR = money out
+const r2 = n => Math.round(n * 100) / 100;
+/* Maha Prasad donations now come from the separate donations form sheet (read live, column H = Amount, column B = Name) */
+const FORM_SHEET_ID = '1HWj72ifsPxbtMbznQ8Lj6ZfSKZFZ3nX11en6CVoH5ZM';
+const FORM_TAB = '';             // '' = first tab
+const FORM_NAME_COL = 2, FORM_AMT_COL = 8, FORM_MODE_COL = 9, FORM_HEADER_ROWS = 1;
+const MAHA_PRASAD_BUDGET = 0;    // Maha Prasad items are live in the Items tab and carry their own budget, so no extra budget is added here.
 const FIELD_COL = { cat: 1, item: 2, date: 3, slot: 4, unit: 5, req: 6, est: 7 };
 const EPS = 1e-9;
 // Physical-booking limits: Rice 120%, other Maha Prasad 110%, Daily Prasad 120%, rest 100%. Cash has no limit.
@@ -48,6 +51,7 @@ function handle_(b) {
     if (a === 'subs') return subs_();
     if (a === 'shot') return shotGet_(b);
     if (a === 'ext') return ext_();
+    if (a === 'mix') return mix_();
     const fn = { 'item': update_, 'item/add': add_, 'item/delete': del_, 'sub/delete': subDel_, 'ext/add': extAdd_, 'ext/update': extUpd_, 'ext/delete': extDel_ }[a];
     if (!fn) throw new Error('Not found');
     return locked_(() => fn(b));
@@ -57,7 +61,8 @@ function handle_(b) {
 
 /** Run once: creates both sheets and loads the starting items. */
 function setup() {
-  const sh = sheet_('Items'), sb = sheet_('Submissions'); sheet_('External'); otherTab_();
+  const sh = sheet_('Items'), sb = sheet_('Submissions'); const ex = sheet_('External'); formTab_();
+  if (!ex.getRange(1, 6).getValue()) ex.getRange(1, 6).setValue('Mode').setFontWeight('bold').setBackground('#fde7d0');
   if (!sb.getRange(1, 10).getValue()) sb.getRange(1, 10).setValue('Mode').setFontWeight('bold').setBackground('#fde7d0');
   sb.getRange(1, 11).setValue('Payment Screenshot').setFontWeight('bold').setBackground('#fde7d0');
   shotFolder_();   // creates the private Drive folder (also asks for Drive permission)
@@ -122,7 +127,8 @@ function subs_() {
 function state_() {
   const c = CacheService.getScriptCache(), hit = c.get('state');
   if (hit) return JSON.parse(hit);
-  const s = { items: items_(), subs: subs_().map(x => ({ sid: x.sid, rid: x.rid, qty: x.qty, amt: x.amt, pq: x.mode === 'Cash' ? 0 : x.qty })), other: other_(), ext: ext_().reduce((a, x) => a + x.amt, 0) };   // public gets only the external TOTAL, never names // public: no donor name/phone/flat
+  const au = auction_(), subs = subs_(), items = items_(), m = money_(subs, ext_(), au);
+  const s = { items: items, subs: subs.map(x => ({ sid: x.sid, rid: x.rid, qty: x.qty, amt: x.amt, pq: x.mode === 'Cash' ? 0 : x.qty })), other: m.other, hundi: m.hundi, hh: m.hh, hand: m.hand, spend: m.spend, phys: m.phys, bank: m.bank, net: m.net, sc: m.sc, sp: m.sp, ec: m.ec, ep: m.ep, mp: m.mp, mpBudget: MAHA_PRASAD_BUDGET, ext: m.ext, auction: au, donors: donors_(subs, items), cs: catSpends_() };   // public: totals only, no names/phones
   try { c.put('state', JSON.stringify(s), 30); } catch (e) {}
   return s;
 }
@@ -223,38 +229,257 @@ function subDel_(b) {
   return { ok: true };
 }
 
-/* ---------- other-source cash (column L) ----------
- * Preferred: tab "Other Source" in THIS sheet, filled by IMPORTRANGE (created by setup()). One-time: open that tab and click "Allow access".
- * Fallback: read the other spreadsheet directly (works if the script owner can open it). */
-function sumCol_(sh, headerRows) {
-  const n = sh.getLastRow() - headerRows;
-  if (n < 1) return 0;
-  let t = 0;
-  sh.getRange(headerRows + 1, 1, n, OTHER_COL).getValues().forEach(r => {
-    if (r.some(c => /total/i.test(String(c)))) return;          // skip any "Total" row so nothing is counted twice
-    const v = r[OTHER_COL - 1];
-    if (String(v).trim() === '') return;
-    const x = typeof v === 'number' ? v : Number(String(v).replace(/[^0-9.\-]/g, ''));
-    if (isFinite(x)) t += x;
+/* ---------- Maha Prasad donations form (separate sheet, read live) ---------- */
+function formSum_(sh) {
+  const n = sh.getLastRow() - FORM_HEADER_ROWS, o = { cash: 0, phys: 0, total: 0 };
+  if (n < 1) return o;
+  sh.getRange(FORM_HEADER_ROWS + 1, 1, n, FORM_MODE_COL).getValues().forEach(r => {
+    if (String(r[FORM_NAME_COL - 1]).trim() === '') return;              // count only rows that have a donor name
+    const v = r[FORM_AMT_COL - 1], x = typeof v === 'number' ? v : Number(String(v).replace(/[^0-9.\-]/g, ''));
+    if (String(v).trim() === '' || !isFinite(x)) return;
+    /phys/i.test(String(r[FORM_MODE_COL - 1])) ? o.phys += x : o.cash += x;
   });
-  return Math.round(t * 100) / 100;
+  o.cash = r2(o.cash); o.phys = r2(o.phys); o.total = r2(o.cash + o.phys);
+  return o;
 }
-function other_() {
+// Preferred: the live "Maha Prasad Form" tab in THIS sheet (IMPORTRANGE, created by setup). Fallback: read the form sheet directly.
+function formSheet_() {
   try {
-    const loc = ss_().getSheetByName('Other Source');
-    if (loc && loc.getLastRow() > 1 && !/^#|Loading/i.test(String(loc.getRange(1, 1).getValue()))) return sumCol_(loc, OTHER_HEADER_ROWS);
+    const loc = ss_().getSheetByName('Maha Prasad Form');
+    if (loc && loc.getLastRow() > 1 && !/^#|Loading/i.test(String(loc.getRange(1, 1).getValue()))) return loc;
   } catch (e) {}
   try {
-    const ss = SpreadsheetApp.openById(OTHER_SHEET_ID);
-    return sumCol_(OTHER_TAB ? ss.getSheetByName(OTHER_TAB) : ss.getSheets()[0], OTHER_HEADER_ROWS);
-  } catch (e) { return null; }    // null = could not read
+    const ss = SpreadsheetApp.openById(FORM_SHEET_ID);
+    return FORM_TAB ? ss.getSheetByName(FORM_TAB) : ss.getSheets()[0];
+  } catch (e) { return null; }
 }
-/** Creates the "Other Source" tab with an IMPORTRANGE of columns A:L (called from setup). */
-function otherTab_() {
+function form_() { try { const sh = formSheet_(); return sh ? formSum_(sh) : null; } catch (e) { return null; } }
+// one entry per named row of the donations form: { cat, mode, amt }
+function formRows_() {
+  const sh = formSheet_(), out = [];
+  if (!sh) return out;
+  const n = sh.getLastRow() - FORM_HEADER_ROWS;
+  if (n < 1) return out;
+  sh.getRange(FORM_HEADER_ROWS + 1, 1, n, FORM_MODE_COL).getValues().forEach(r => {
+    if (String(r[FORM_NAME_COL - 1]).trim() === '') return;
+    const v = r[FORM_AMT_COL - 1], x = typeof v === 'number' ? v : Number(String(v).replace(/[^0-9.\-]/g, ''));
+    if (String(v).trim() === '' || !isFinite(x)) return;
+    out.push({ cat: String(r[4]).trim() || '(no category)', mode: /phys/i.test(String(r[FORM_MODE_COL - 1])) ? 'Physical' : 'Cash', amt: x });
+  });
+  return out;
+}
+/** Creates the live "Maha Prasad Form" tab (IMPORTRANGE of columns A:J). Safe to re-run. */
+function formTab_() {
   const s = ss_();
-  if (s.getSheetByName('Other Source')) return;
-  const sh = s.insertSheet('Other Source');
-  sh.getRange(1, 1).setFormula('=IMPORTRANGE("https://docs.google.com/spreadsheets/d/' + OTHER_SHEET_ID + '","' + (OTHER_TAB ? OTHER_TAB + '!' : '') + 'A:L")');
+  if (s.getSheetByName('Maha Prasad Form')) return;
+  s.insertSheet('Maha Prasad Form').getRange(1, 1).setFormula('=IMPORTRANGE("https://docs.google.com/spreadsheets/d/' + FORM_SHEET_ID + '","' + (FORM_TAB ? FORM_TAB + '!' : '') + 'A:J")');
+}
+/* ---------- bank statement (live hundi) ---------- */
+function statement_() {
+  const sh = ss_().getSheetByName(STATEMENT_TAB);
+  if (!sh || sh.getLastRow() < 2) return null;
+  const v = sh.getDataRange().getValues(), h = v[0].map(x => String(x).trim().toLowerCase());
+  const col = (re, d) => { const i = h.findIndex(x => re.test(x)); return i < 0 ? d : i; };
+  const A = col(/amount/, 2), S = col(/status/, 4), T = col(/^type$/, 5);
+  let cr = 0, dr = 0;
+  v.slice(1).forEach(r => {
+    const t = String(r[T]).trim().toUpperCase(), x = Number(String(r[A]).replace(/[^0-9.\-]/g, ''));
+    if (!isFinite(x) || /err|fail|declin|revers|cancel|reject/i.test(String(r[S]))) return;   // failed transactions are ignored
+    if (t === 'CR') cr += x; else if (t === 'DR') dr += x;
+  });
+  return { cr: r2(cr), dr: r2(dr) };
+}
+const split_ = rows => rows.reduce((o, x) => { x.mode === 'Cash' ? o.cash += x.amt : o.phys += x.amt; return o; }, { cash: 0, phys: 0 });
+
+/* Hand Hold Cash tab: sums the "Amount" column (defaults to column C), skipping "Total" rows and rows whose "Deposited" column is Yes. */
+function handHold_() {
+  const sh = ss_().getSheetByName('Hand Hold Cash');
+  if (!sh || sh.getLastRow() < 2) return 0;
+  const v = sh.getDataRange().getValues(), h = v[0].map(x => String(x).trim().toLowerCase());
+  let A = h.findIndex(x => /amount/.test(x) && !/deposit/.test(x)); if (A < 0) A = 2;
+  const D = h.findIndex(x => /deposit/.test(x));      // "Deposited to bank account" column: Yes = already in the bank, so it is no longer hand-hold
+  let t = 0;
+  v.slice(1).forEach(r => {
+    if (/^total/i.test(String(r[0]).trim())) return;
+    if (D >= 0 && /^\s*(y|yes)\b/i.test(String(r[D]))) return;
+    const x = num_(r[A]); if (isFinite(x)) t += x;
+  });
+  return r2(t);
+}
+
+/**
+ * other  = Residents Donation form (Other Source tab) total
+ * hundi  = bank credits - form cash (Other Source + Maha Prasad form + Submissions) - External cash - Auction credited to A/C
+ * hh     = Hand Hold Cash tab; hand = hh + auction hand-hold
+ * Spends = bank debits + all physical items.
+ */
+function money_(subs, ext, au) {
+  const st = statement_(), f = form_(), res = otherForm_(), sb = split_(subs), ex = split_(ext);
+  const ab = au ? au.bank : 0, ah = au ? au.hand : 0, hh = handHold_();
+  const ok = !!(st && f);
+  return { other: res,
+           hundi: ok && res != null ? r2(st.cr - res - sb.cash - f.cash - ex.cash - ab) : null,
+           hh: hh, hand: r2(hh + ah),
+           spend: ok ? r2(st.dr + sb.phys + f.phys + ex.phys) : null,
+           phys: ok ? r2(sb.phys + f.phys + ex.phys) : null, bank: ok ? st.dr : null, net: st ? r2(st.cr - st.dr) : null,
+           sc: f ? r2(sb.cash + f.cash) : null, sp: f ? r2(sb.phys + f.phys) : null, ec: r2(ex.cash), ep: r2(ex.phys),   // cash vs physical split of Sponsored / External
+           mp: f ? f.total : null, ext: r2(ex.cash + ex.phys) };
+}
+
+/* Resident donation form = the "Other Source" tab (donations form): column L amount, only rows that have a name in column D */
+const OTHER_SHEET_ID = '1N28jKtSsuePNc5PMhAwyuCFXutCJhtWwxljgqoaeLrA';
+function sumOther_(sh) {
+  const n = sh.getLastRow() - 1;
+  if (n < 1) return 0;
+  let t = 0;
+  sh.getRange(2, 1, n, 12).getValues().forEach(r => {
+    if (String(r[3]).trim() === '') return;
+    const v = r[11], x = typeof v === 'number' ? v : Number(String(v).replace(/[^0-9.\-]/g, ''));
+    if (String(v).trim() !== '' && isFinite(x)) t += x;
+  });
+  return r2(t);
+}
+function otherSheet_() {
+  try {
+    const loc = ss_().getSheetByName('Other Source');
+    if (loc && loc.getLastRow() > 1 && !/^#|Loading/i.test(String(loc.getRange(1, 1).getValue()))) return loc;
+  } catch (e) {}
+  try { return SpreadsheetApp.openById(OTHER_SHEET_ID).getSheets()[0]; } catch (e) { return null; }
+}
+function otherForm_() { try { const sh = otherSheet_(); return sh ? sumOther_(sh) : null; } catch (e) { return null; } }
+/* ---------- auction (tab "Auction"): public gets totals + winner name/flat/day/alankarana/amount; mobile, payment status & comments stay private ---------- */
+function auctionRows_() {
+  const sh = ss_().getSheetByName('Auction');
+  if (!sh || sh.getLastRow() < 2) return null;
+  const v = sh.getDataRange().getValues(), h = v[0].map(x => String(x).trim().toLowerCase());
+  const col = (re, d) => { const i = h.findIndex(x => re.test(x)); return i < 0 ? d : i; };
+  const NO = col(/item|saree/, 0), DAY = col(/^day/, 1), AL = col(/alank|ammavaru/, 2), TW = col(/tower/, 3), FL = col(/^flat/, 4), AM = col(/amount/, 5), WN = col(/winner/, 6), MB = col(/mobile|phone/, 7), PY = col(/payment/, 8), CM = col(/comment|remark|note/, 9);
+  const whole = x => (typeof x === 'number' && isFinite(x)) ? String(Math.round(x)) : String(x).trim();
+  const out = [];
+  v.slice(1).forEach(r => {
+    const name = String(r[WN]).trim(), amt = Number(String(r[AM]).replace(/[^0-9.\-]/g, ''));
+    if (name === '' && !(amt > 0)) return;
+    const d = r[DAY];
+    const pd = /^\s*paid\b/i.test(String(r[PY])), cm = String(r[CM] || '');
+    out.push({ no: whole(r[NO]), day: typeof d === 'number' ? 'Day ' + Math.round(d) : String(d).trim(), dn: typeof d === 'number' ? d : 999,
+               alank: String(r[AL]).trim(), name: name, tower: whole(r[TW]), flat: whole(r[FL]), mob: r[MB],
+               amt: isFinite(amt) ? amt : 0, paid: pd,
+               hand: pd && !/paid\s*to\s*committee/i.test(cm) && /hand\s*-?\s*hold/i.test(cm) });
+  });
+  return out;
+}
+function auction_() {
+  const a = auctionRows_();
+  if (!a) return null;
+  a.sort((x, y) => x.dn - y.dn || Number(x.no) - Number(y.no));
+  const sum = rows => r2(rows.reduce((t, x) => t + x.amt, 0));
+  const paid = sum(a.filter(x => x.paid)), hand = sum(a.filter(x => x.paid && x.hand));
+  return { total: sum(a), paid: paid, hand: hand, bank: r2(paid - hand), count: a.length,
+           winners: a.map(x => ({ no: x.no, day: x.day, alank: x.alank, name: x.name, tower: x.tower, flat: x.flat, amt: x.amt })) };
+}
+
+/* ---------- donor honour board: unique donors across Submissions, Maha Prasad form and Residents form (External and Auction excluded; auction is shown separately) ---------- */
+const BOARD_EXCLUDE = /commit/i;     // the committee's own entries are not donors
+function digits_(v) { return typeof v === 'number' ? String(Math.round(v)) : String(v == null ? '' : v).replace(/\D/g, ''); }
+function mobile_(v) { const d = digits_(v); return d.length >= 10 ? d.slice(-10) : ''; }
+function flatNo_(v) { const t = typeof v === 'number' ? String(Math.round(v)) : String(v == null ? '' : v).trim().toUpperCase().replace(/\s+/g, ''); return /^\d+$/.test(t) ? String(parseInt(t, 10)) : t; }
+function towerNo_(v) { const d = digits_(v); return d === '' ? '' : String(parseInt(d, 10)); }
+function tf_(t, f) { const tt = towerNo_(t), ff = flatNo_(f); return tt !== '' && ff !== '' ? 'T' + tt + '-' + ff : ''; }
+function tfText_(s) { const m = /(\d+)\s*[-\u2013]\s*([A-Za-z0-9]+)/.exec(String(s)); return m ? tf_(m[1], m[2]) : ''; }
+function tidy_(n) { n = String(n).replace(/\s+/g, ' ').trim(); return (n === n.toUpperCase() && /[A-Z]/.test(n)) ? n.toLowerCase().replace(/\b[a-z]/g, c => c.toUpperCase()) : n; }
+function num_(v) { return typeof v === 'number' ? v : Number(String(v).replace(/[^0-9.\-]/g, '')); }
+function donors_(subs, items) {
+  const recs = [];
+  subs.forEach(x => { const it = items[x.rid]; recs.push({ name: x.donor, tf: tf_(x.tower, x.flat), mob: mobile_(x.phone), cat: it ? String(it.cat).trim() : 'Others', amt: x.amt }); });
+  try {
+    const sh = formSheet_(), n = sh ? sh.getLastRow() - FORM_HEADER_ROWS : 0;
+    if (n >= 1) sh.getRange(FORM_HEADER_ROWS + 1, 1, n, FORM_MODE_COL).getValues().forEach(r => {
+      if (String(r[FORM_NAME_COL - 1]).trim() === '') return;
+      const v = r[FORM_AMT_COL - 1], a = num_(v);
+      if (String(v).trim() === '' || !isFinite(a)) return;
+      recs.push({ name: r[FORM_NAME_COL - 1], tf: tfText_(r[2]), mob: mobile_(r[3]), cat: 'Maha Prasad', amt: a });
+    });
+  } catch (e) {}
+  try {
+    const sh = otherSheet_(), n = sh ? sh.getLastRow() - 1 : 0;
+    if (n >= 1) sh.getRange(2, 1, n, 12).getValues().forEach(r => {
+      if (String(r[3]).trim() === '') return;
+      const v = r[11], a = num_(v);
+      if (String(v).trim() === '' || !isFinite(a)) return;
+      recs.push({ name: r[3], tf: tf_(r[1], r[2]), mob: mobile_(r[8]), cat: 'Residents Donation', amt: a });
+    });
+  } catch (e) {}
+
+  const ok = recs.filter(r => String(r.name).trim() !== '' && isFinite(r.amt) && r.amt > 0 && !BOARD_EXCLUDE.test(String(r.name)));
+  // A household = tower-flat.  A mobile number only stands in for a missing flat, and only if that mobile belongs to exactly one flat
+  // (a number shared by several flats, e.g. someone submitting on others' behalf, is never used to merge families).
+  const mobFlats = {};
+  ok.forEach(r => { if (r.tf && r.mob) (mobFlats[r.mob] = mobFlats[r.mob] || {})[r.tf] = 1; });
+  const groups = {};
+  ok.forEach(r => {
+    let k = r.tf;
+    if (!k && r.mob) { const fl = Object.keys(mobFlats[r.mob] || {}); k = fl.length === 1 ? fl[0] : 'm:' + r.mob; }
+    if (!k) k = 'n:' + String(r.name).trim().toLowerCase();
+    const g = groups[k] || (groups[k] = { tf: /^T\d/.test(k) ? k : '', total: 0, cats: {}, best: null });
+    g.total += r.amt; g.cats[r.cat] = (g.cats[r.cat] || 0) + r.amt;
+    if (!g.best || r.amt > g.best.amt || (r.amt === g.best.amt && String(r.name).length > String(g.best.name).length)) g.best = r;
+  });
+  return Object.keys(groups).map(k => {
+    const g = groups[k];
+    return { name: tidy_(g.best.name), flat: g.tf ? g.tf.replace('-', ' - ') : '', total: r2(g.total),
+             cats: Object.keys(g.cats).map(c => ({ c: c, a: r2(g.cats[c]) })).sort((x, y) => y.a - x.a) };
+  }).sort((x, y) => y.total - x.total || x.name.localeCompare(y.name));
+}
+
+/* ---------- category spends (tab "Category Spends": A=Category, C=Physical, D=Cash, E=Total) ---------- */
+function catSpends_() {
+  try {
+    const sh = ss_().getSheetByName('Category Spends');
+    if (!sh || sh.getLastRow() < 2) return null;
+    const n = x => { const a = num_(x); return isFinite(a) ? a : 0; };
+    const m = {}, order = [];
+    sh.getDataRange().getValues().slice(1).forEach(r => {
+      const c = String(r[0]).trim();
+      if (c === '' || /^total$/i.test(c)) return;
+      const p = n(r[2]), k = n(r[3]), t = String(r[4]).trim() === '' ? p + k : n(r[4]);
+      if (!m[c]) { m[c] = { cat: c, p: 0, c: 0, t: 0 }; order.push(c); }
+      m[c].p += p; m[c].c += k; m[c].t += t;
+    });
+    return order.map(c => ({ cat: c, p: r2(m[c].p), c: r2(m[c].c), t: r2(m[c].t) }));
+  } catch (e) { return null; }
+}
+
+/** Admin: where the bank credits come from, what is physical, and what is spent. */
+function cashbook_(subs, ext) {
+  const st = statement_();
+  if (!st) return null;
+  const f = form_(), res = otherForm_(), sb = split_(subs), ex = split_(ext), au = auction_(), ap = au ? au.bank : 0;   // only auction money credited to A/C
+  const ok = res != null && !!f;                                   // the balancing figure needs every part
+  const mpc = f ? f.cash : null, mpp = f ? f.phys : 0;
+  const phys = r2(sb.phys + mpp + ex.phys);
+  return {
+    credit: { total: st.cr, resident: res, subs: r2(sb.cash), mp: mpc == null ? null : r2(mpc), ext: r2(ex.cash),
+              auction: r2(ap),
+              hundi: ok ? r2(st.cr - res - sb.cash - mpc - ex.cash - ap) : null },
+    physical: { subs: r2(sb.phys), mp: f ? r2(mpp) : null, ext: r2(ex.phys), total: f ? phys : null },
+    spend: { bank: st.dr, physical: f ? phys : null, total: f ? r2(st.dr + phys) : null },
+    pendingBank: r2(st.cr - st.dr)
+  };
+}
+
+/** Admin: cash vs physical contributions for every source and category. */
+function mix_() {
+  const S = subs_(), E = ext_(), items = items_(), acc = {}, order = ['Submissions', 'Maha Prasad Form', 'External'];
+  const add = (src, cat, mode, amt) => {
+    const k = src + '|' + cat, o = acc[k] || (acc[k] = { src: src, cat: cat, cash: 0, phys: 0 });
+    mode === 'Cash' ? o.cash += amt : o.phys += amt;
+  };
+  S.forEach(x => { const it = items[x.rid]; add('Submissions', it ? it.cat : '(not linked)', x.mode === 'Cash' ? 'Cash' : 'Physical', x.amt); });
+  formRows_().forEach(x => add('Maha Prasad Form', x.cat, x.mode, x.amt));
+  E.forEach(x => add('External', 'External Contributions', x.mode === 'Physical' ? 'Physical' : 'Cash', x.amt));
+  const rows = Object.keys(acc).map(k => acc[k]).map(o => ({ src: o.src, cat: o.cat, cash: r2(o.cash), phys: r2(o.phys) }))
+    .sort((a, b) => order.indexOf(a.src) - order.indexOf(b.src) || a.cat.localeCompare(b.cat));
+  return { rows: rows, book: cashbook_(S, E) };
 }
 
 /* ---------- readable item details in Submissions ---------- */
@@ -310,19 +535,25 @@ function shotGet_(b) {      // only files linked from a Submissions row can be r
 function ext_() {
   const sh = sheet_('External'), n = sh.getLastRow() - 1;
   if (n < 1) return [];
-  return sh.getRange(2, 1, n, 5).getValues().filter(r => r[0] !== '').map(r => ({
-    id: String(r[0]), name: String(r[1]), amt: Number(r[2]),
+  return sh.getRange(2, 1, n, 6).getValues().filter(r => r[0] !== '').map(r => ({
+    id: String(r[0]), name: String(r[1]), amt: Number(r[2]), mode: /phys/i.test(String(r[5])) ? 'Physical' : 'Cash',
     date: r[3] instanceof Date ? Utilities.formatDate(r[3], Session.getScriptTimeZone(), 'yyyy-MM-dd') : String(r[3]) }));
 }
+function extMode_(b) {
+  if (b.mode !== 'Cash' && b.mode !== 'Physical') throw new Error('Select payment mode (Cash or Physical item)');
+  return b.mode;
+}
 function extAdd_(b) {
+  const mode = extMode_(b);
   const name = String(b.name || '').trim().slice(0, 80), amt = Number(b.amt), date = String(b.date || '').trim();
   if (!name) throw new Error('Enter donor name');
   if (!isFinite(amt) || amt <= 0) throw new Error('Enter a valid amount');
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new Error('Select a date');
-  append_(sheet_('External'), [[Utilities.getUuid(), name, Math.round(amt * 100) / 100, date, new Date().toISOString()]]);
+  append_(sheet_('External'), [[Utilities.getUuid(), name, Math.round(amt * 100) / 100, date, new Date().toISOString(), mode]]);
   return { ok: true };
 }
 function extUpd_(b) {
+  const mode = extMode_(b);
   const sh = sheet_('External'), n = sh.getLastRow() - 1;
   const name = String(b.name || '').trim().slice(0, 80), amt = Number(b.amt), date = String(b.date || '').trim();
   if (!name) throw new Error('Enter donor name');
@@ -332,6 +563,7 @@ function extUpd_(b) {
   const ids = sh.getRange(2, 1, n, 1).getValues();
   for (let i = 0; i < n; i++) if (String(ids[i][0]) === String(b.id)) {
     sh.getRange(i + 2, 2, 1, 3).setValues([[name, Math.round(amt * 100) / 100, date]]);
+    sh.getRange(i + 2, 6).setValue(mode);
     return { ok: true };
   }
   throw new Error('Entry not found');
