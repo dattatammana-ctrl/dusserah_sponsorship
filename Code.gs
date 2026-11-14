@@ -319,7 +319,7 @@ function money_(subs, ext, au) {
   const ok = !!(st && f);
   return { other: res,
            hundi: ok && res != null ? r2(st.cr - res - sb.cash - f.cash - ex.cash - ab) : null,
-           hh: hh, hand: r2(hh + ah),
+           hh: hh, hand: hh,   // the Hand Hold Cash sheet already includes the auction handhold rows, so they are not added again
            spend: ok ? r2(st.dr + sb.phys + f.phys + ex.phys) : null,
            phys: ok ? r2(sb.phys + f.phys + ex.phys) : null, bank: ok ? st.dr : null, net: st ? r2(st.cr - st.dr) : null,
            sc: f ? r2(sb.cash + f.cash) : null, sp: f ? r2(sb.phys + f.phys) : null, ec: r2(ex.cash), ep: r2(ex.phys),   // cash vs physical split of Sponsored / External

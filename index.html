@@ -129,7 +129,7 @@ function summaryData(S=subs){
     return {cat,item,rs,req,est,sa,pq,u,names,nd:new Set(rs.map(r=>r.date)).size,pct:est?sa/est*100:0}}).sort((a,b)=>catRank(a.cat)-catRank(b.cat));
 }
 function kpiList(e0,sa0,ext,extra){   // returns rows of cards: totals / forms / others / spends / auction
-  const e=e0+MPB,res=OTHER||0,sa=sa0+(MP||0),auc=AUC?AUC.paid:0,recv=res+sa+ext+auc+(HUNDI||0)+HH,ok=SPEND!=null,sp=ok&&PHYS!=null&&BANKDR!=null;   // sa = Submissions + Maha Prasad form
+  const e=e0+MPB,res=OTHER||0,sa=sa0+(MP||0),auc=AUC?AUC.bank:0,recv=res+sa+ext+auc+(HUNDI||0)+HH,ok=SPEND!=null,sp=ok&&PHYS!=null&&BANKDR!=null;   // sa = Submissions + Maha Prasad form
   const U=v=>v==null?'Unavailable':inr(v);
   return [
     ['Budget Overview',[['Total Budgeted',inr(e)],['Total Received (Donations + Contributions)',inr(recv)],['Cash',SP==null||EP==null?'Unavailable':inr(recv-SP-EP),1],['Physical',SP==null||EP==null?'Unavailable':inr(SP+EP),1],['Pending Donations',inr(Math.max(0,e-recv))],['Target %',(e?recv/e*100:0).toFixed(1)+'%']]],
@@ -150,10 +150,10 @@ function renderCats(){
   const dash='<td class="n">—</td><td class="n">—</td><td class="n">—</td>';
   const rd=OTHER==null?null:OTHER; if(rd!=null)Rv+=rd;      // Residents Donations: estimate 0, actual = Residents Donation Form total
   const resRow=`<tr><td><b>Residents Donations</b></td><td class="n">${inr(0)}</td><td class="n">${rd==null?'Unavailable':inr(rd)}</td>${dash}</tr>`;
-  Rv+=(EXTP||0)+(AUC?AUC.paid:0)+(HUNDI||0)+HH;                                // External + Auction + Hundi (no form) + Hand Hold Cash sheet
+  Rv+=(EXTP||0)+(AUC?AUC.bank:0)+(HUNDI||0)+HH;                                // External + Auction + Hundi (no form) + Hand Hold Cash sheet
   const hundiRow=`<tr><td><b>Hundi / A/C Transfer (without form)</b></td><td class="n">${inr(0)}</td><td class="n">${HUNDI==null?'Unavailable':inr(HUNDI)}</td>${dash}</tr>`;
   const extRow=`<tr><td><b>External Contributions</b></td><td class="n">${inr(0)}</td><td class="n">${inr(EXTP||0)}</td>${dash}</tr>`;
-  const aucRow=`<tr><td><b>Auction</b></td><td class="n">${inr(0)}</td><td class="n">${AUC?inr(AUC.paid):'Unavailable'}</td>${dash}</tr>`;
+  const aucRow=`<tr><td><b>Auction</b></td><td class="n">${inr(0)}</td><td class="n">${AUC?inr(AUC.bank):'Unavailable'}</td>${dash}</tr>`;
   const handRow=`<tr><td><b>Hand Hold Cash</b></td><td class="n">${inr(0)}</td><td class="n">${inr(HH)}</td>${dash}</tr>`;
   $('#catsum tbody').innerHTML=rows+resRow+hundiRow+extRow+aucRow+handRow+`<tr style="font-weight:700;background:#faf0e4"><td>Total</td><td class="n">${inr(E)}</td><td class="n">${inr(Rv)}</td>${CS===null?dash:`<td class="n">${inr(ST)}</td><td class="n">${inr(SPh)}</td><td class="n">${inr(SC_)}</td>`}</tr>`;
 }
